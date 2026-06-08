@@ -183,14 +183,18 @@ def update_session(sid):
         if not row:
             return jsonify({"ok": False, "error": "Not found"}), 404
         existing = dict(row)
+        if not _owns_session(con, existing):
+            return jsonify({"ok": False, "error": "Forbidden"}), 403
         # Only update fields that were actually sent
+        new_category = s.get("category", existing.get("category",""))
         con.execute("""
             UPDATE sessions SET
-              location=?, iv1=?, iv2=?, iv3=?, iv4=?,
+              category=?, location=?, iv1=?, iv2=?, iv3=?, iv4=?,
               notes=?, trial=?, note_photos=?, note_markers=?, qa_thread=?,
               pm1=?, pm25=?, pm10=?, temp=?, humidity=?
             WHERE id=?
         """, (
+            new_category,
             s.get("location", existing.get("location","")),
             s.get("iv1",     existing.get("iv1","")),
             s.get("iv2",     existing.get("iv2","")),
@@ -208,11 +212,18 @@ def update_session(sid):
             s.get("humidity",existing.get("humidity")),
             sid
         ))
+        if new_category != existing.get("category",""):
+            _recalc_trials(con)
     return jsonify({"ok": True})
 
 @app.route("/api/sessions/<int:sid>", methods=["DELETE"])
 def delete_session(sid):
     with get_db() as con:
+        row = con.execute("SELECT * FROM sessions WHERE id=?", (sid,)).fetchone()
+        if not row:
+            return jsonify({"ok": False, "error": "Not found"}), 404
+        if not _owns_session(con, dict(row)):
+            return jsonify({"ok": False, "error": "Forbidden"}), 403
         con.execute("DELETE FROM sessions WHERE id=?", (sid,))
     return jsonify({"ok": True})
 
@@ -276,7 +287,19 @@ def add_category():
         """, (c["name"], c["hex"], c["text"], c["icon"]))
     return jsonify({"ok": True})
 
-# ── Helper ────────────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
+def _owns_session(con, session_row):
+    """Return True if the requesting user is admin or uploaded this session."""
+    pin = request.headers.get("X-User-Pin", "")
+    if pin == ADMIN_PIN:
+        return True
+    if not pin:
+        return False
+    user = con.execute("SELECT display_name FROM users WHERE pin=?", (pin,)).fetchone()
+    if not user:
+        return False
+    return user["display_name"] == (session_row.get("uploaded_by") or "")
+
 def _recalc_trials(con):
     """Re-number trials within each category by date+time ascending"""
     rows = con.execute("SELECT id, category, date, time FROM sessions").fetchall()
