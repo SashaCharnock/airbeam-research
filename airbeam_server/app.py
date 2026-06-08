@@ -183,8 +183,14 @@ def update_session(sid):
         if not row:
             return jsonify({"ok": False, "error": "Not found"}), 404
         existing = dict(row)
-        if not _owns_session(con, existing):
-            return jsonify({"ok": False, "error": "Forbidden"}), 403
+        # Q&A updates are allowed for any authenticated user; all other edits require ownership
+        qa_only = set(s.keys()) <= {"qaThread"}
+        if qa_only:
+            if not _is_authenticated(con):
+                return jsonify({"ok": False, "error": "Forbidden"}), 403
+        else:
+            if not _owns_session(con, existing):
+                return jsonify({"ok": False, "error": "Forbidden"}), 403
         # Only update fields that were actually sent
         new_category = s.get("category", existing.get("category",""))
         con.execute("""
@@ -299,6 +305,15 @@ def _owns_session(con, session_row):
     if not user:
         return False
     return user["display_name"] == (session_row.get("uploaded_by") or "")
+
+def _is_authenticated(con):
+    """Return True if the requesting user has any valid pin (admin or registered user)."""
+    pin = request.headers.get("X-User-Pin", "")
+    if not pin:
+        return False
+    if pin == ADMIN_PIN:
+        return True
+    return con.execute("SELECT 1 FROM users WHERE pin=?", (pin,)).fetchone() is not None
 
 def _recalc_trials(con):
     """Re-number trials within each category by date+time ascending"""

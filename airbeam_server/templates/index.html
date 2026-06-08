@@ -1601,15 +1601,17 @@ window.addEventListener('load', function() {
       setModal(null);
     }
     function handleUpdatePhotos(id,photos){
-      fetch('/api/sessions/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({notePhotos:photos})}).catch(function(){});
+      fetch('/api/sessions/'+id,{method:'PUT',headers:{'Content-Type':'application/json','X-User-Pin':userPin},body:JSON.stringify({notePhotos:photos})}).catch(function(){});
       setSessions(function(ss){return ss.map(function(s){return s.id===id?Object.assign({},s,{notePhotos:photos}):s;});});
     }
     function handleUpdateNotes(id,noteMarkers){
-      fetch('/api/sessions/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({noteMarkers:noteMarkers})}).catch(function(){showToast('Note save failed',false);});
+      fetch('/api/sessions/'+id,{method:'PUT',headers:{'Content-Type':'application/json','X-User-Pin':userPin},body:JSON.stringify({noteMarkers:noteMarkers})}).catch(function(){showToast('Note save failed',false);});
       setSessions(function(ss){return ss.map(function(s){return s.id===id?Object.assign({},s,{noteMarkers:noteMarkers}):s;});});
     }
     function handleUpdateQA(id,qaThread){
-      fetch('/api/sessions/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({qaThread:qaThread})}).catch(function(){showToast('Q&A save failed',false);});
+      fetch('/api/sessions/'+id,{method:'PUT',headers:{'Content-Type':'application/json','X-User-Pin':userPin},body:JSON.stringify({qaThread:qaThread})})
+        .then(function(r){if(!r.ok)showToast('Q&A save failed',false);})
+        .catch(function(){showToast('Q&A save failed',false);});
       setSessions(function(ss){return ss.map(function(s){return s.id===id?Object.assign({},s,{qaThread:qaThread}):s;});});
     }
 
