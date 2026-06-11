@@ -689,7 +689,11 @@ window.addEventListener('load', function() {
             e('span',{style:{color:"#94a3b8",flexShrink:0}},n.t.slice(0,5)),
             e('span',{style:{color:"#64748b",marginLeft:6,flex:1}},n.note),
             !props.viewOnly?e('button',{onClick:function(){setEditingNoteIdx(i);setEditText(n.note||'');},
-              style:{background:"none",border:"none",color:"#475569",fontSize:10,cursor:"pointer",padding:"0 2px",lineHeight:1,flexShrink:0}},"✎"):null
+              style:{background:"none",border:"none",color:"#475569",fontSize:10,cursor:"pointer",padding:"0 2px",lineHeight:1,flexShrink:0}},"✎"):null,
+            !props.viewOnly?e('button',{onClick:function(){
+              var updated=nm.filter(function(_,j){return j!==i;});
+              if(props.onUpdateNoteMarkers)props.onUpdateNoteMarkers(updated);
+            },style:{background:"none",border:"none",color:"#7f1d1d",fontSize:10,cursor:"pointer",padding:"0 2px",lineHeight:1,flexShrink:0},title:"Delete note"},"🗑"):null
           );
         })
       ):null
@@ -921,11 +925,35 @@ window.addEventListener('load', function() {
     function set(k,v){setForm(function(f){var o=Object.assign({},f);o[k]=v;return o;});}
     var inp={background:"#1e293b",border:"1px solid #334155",borderRadius:8,padding:"8px 10px",color:"#e2e8f0",fontSize:13,width:"100%",boxSizing:"border-box"};
     var lbl={fontSize:11,color:"#64748b",fontFamily:"monospace",display:"block",marginBottom:3};
-    return e('div',{style:{position:"fixed",inset:0,background:"#0009",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:16}},
-      e('div',{style:{background:"#0f172a",borderRadius:16,padding:22,width:"100%",maxWidth:540,maxHeight:"90vh",overflowY:"auto",border:"2px solid "+meta.hex+"50"}},
-        e('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}},
-          e('div',{style:{fontSize:15,fontWeight:700,color:meta.hex,fontFamily:"monospace"}},meta.icon+" "+(props.session?"Edit":"New")+" "+form.category),
-          e('button',{onClick:props.onClose,style:{background:"none",border:"none",color:"#64748b",fontSize:22,lineHeight:1}},"✕")
+    // Draggable modal
+    var posv=useState(null),pos=posv[0],setPos=posv[1];
+    var dragRef=useRef(null);
+    function onDragStart(ev){
+      var el=ev.currentTarget.parentNode;
+      var rect=el.getBoundingClientRect();
+      dragRef.current={startX:ev.clientX,startY:ev.clientY,origX:rect.left,origY:rect.top};
+      function onMove(mv){
+        var dx=mv.clientX-dragRef.current.startX, dy=mv.clientY-dragRef.current.startY;
+        setPos({x:dragRef.current.origX+dx, y:dragRef.current.origY+dy});
+      }
+      function onUp(){window.removeEventListener('mousemove',onMove);window.removeEventListener('mouseup',onUp);dragRef.current=null;}
+      window.addEventListener('mousemove',onMove);
+      window.addEventListener('mouseup',onUp);
+    }
+    var panelStyle=pos
+      ? {position:"fixed",left:pos.x,top:pos.y,background:"#0f172a",borderRadius:16,padding:22,width:540,maxHeight:"90vh",overflowY:"auto",border:"2px solid "+meta.hex+"50",zIndex:401,boxShadow:"0 8px 40px #000c"}
+      : {background:"#0f172a",borderRadius:16,padding:22,width:"100%",maxWidth:540,maxHeight:"90vh",overflowY:"auto",border:"2px solid "+meta.hex+"50"};
+    var wrapStyle=pos
+      ? {position:"fixed",inset:0,zIndex:400,pointerEvents:"none"}
+      : {position:"fixed",inset:0,background:"#0009",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:16};
+    return e('div',{style:wrapStyle},
+      e('div',{style:Object.assign({},panelStyle,{pointerEvents:"all"})},
+        e('div',{onMouseDown:onDragStart,style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,cursor:"grab",userSelect:"none"}},
+          e('div',{style:{display:"flex",alignItems:"center",gap:8}},
+            e('span',{style:{fontSize:12,color:meta.hex+"80",lineHeight:1}},pos?"⠿⠿":"⠿⠿"),
+            e('div',{style:{fontSize:15,fontWeight:700,color:meta.hex,fontFamily:"monospace"}},meta.icon+" "+(props.session?"Edit":"New")+" "+form.category)
+          ),
+          e('button',{onClick:props.onClose,onMouseDown:function(ev){ev.stopPropagation();},style:{background:"none",border:"none",color:"#64748b",fontSize:22,lineHeight:1,cursor:"pointer"}},"✕")
         ),
         e('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}},
           e('div',null,e('label',{style:lbl},"Date"),e('input',{type:"date",value:form.date,onChange:function(ev){set("date",ev.target.value);},style:inp})),
@@ -942,7 +970,14 @@ window.addEventListener('load', function() {
         meta.ivLabels.length?e('div',{style:{background:"#1e293b",borderRadius:8,padding:10,marginBottom:10}},
           e('div',{style:{fontSize:10,color:"#64748b",fontFamily:"monospace",marginBottom:8}},"INDEPENDENT VARIABLES"),
           e('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}},
-            meta.ivLabels.map(function(l,i){return e('div',{key:i},e('label',{style:lbl},l),e('input',{value:[form.iv1,form.iv2,form.iv3,form.iv4][i],onChange:function(ev){set("iv"+(i+1),ev.target.value);},style:inp}));}))
+            meta.ivLabels.map(function(l,i){
+              var ivKey="iv"+(i+1);
+              return e('div',{key:i},
+                e('label',{style:lbl},l),
+                e(IVQuickTags,{value:form[ivKey],label:l,onChange:function(v){set(ivKey,v);}}),
+                e('input',{value:form[ivKey]||"",onChange:function(ev){set(ivKey,ev.target.value);},style:inp})
+              );
+            }))
         ):null,
         e('div',{style:{background:"#1e293b",borderRadius:8,padding:10,marginBottom:10}},
           e('div',{style:{fontSize:10,color:"#64748b",fontFamily:"monospace",marginBottom:8}},"AIR QUALITY"),
@@ -1497,7 +1532,7 @@ window.addEventListener('load', function() {
       ]).then(function(res){
         setSessions(res[0]);setScenarios(res[1]);
         if(res[2]&&res[2].length){
-          res[2].forEach(function(c){if(!CATEGORY_META[c.name])CATEGORY_META[c.name]={hex:c.hex,text:c.text_color||c.text,icon:c.icon,ivLabels:[],locationHint:"Location",notesHint:"Notes..."};});
+          res[2].forEach(function(c){if(!CATEGORY_META[c.name])CATEGORY_META[c.name]={hex:c.hex,text:c.text_color||c.text,icon:c.icon,ivLabels:c.ivLabels||[],locationHint:"Location",notesHint:"Notes..."};});
           setAllCats(ALL_CATS.concat(res[2].map(function(c){return c.name;})));
         }
         setDataLoaded(true);
@@ -1727,9 +1762,9 @@ window.addEventListener('load', function() {
       showNewCat?e(NewCategoryModal,{
         onSave:function(cat){
           if(!CATEGORY_META[cat.name]){
-            CATEGORY_META[cat.name]={hex:cat.hex,text:cat.text,icon:cat.icon,ivLabels:[],locationHint:"Location",notesHint:"Notes..."};
+            CATEGORY_META[cat.name]={hex:cat.hex,text:cat.text,icon:cat.icon,ivLabels:cat.ivLabels||[],locationHint:"Location",notesHint:"Notes..."};
             setAllCats(function(ac){return ac.concat([cat.name]);});
-            fetch('/api/categories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cat)}).catch(function(){});
+            fetch('/api/categories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:cat.name,hex:cat.hex,text:cat.text,icon:cat.icon,ivLabels:cat.ivLabels||[]})}).catch(function(){});
           }
           setShowNewCat(false);
         },
@@ -1828,6 +1863,64 @@ window.addEventListener('load', function() {
     );
   }
 
+  // ── IV Quick Tags (per-field tag groups for independent variables) ────────
+  var IV_TAG_GROUPS = [
+    {label:"Windows",    tags:["Windows Open","Windows Closed","1 Window Open","2+ Windows Open"]},
+    {label:"Location",   tags:["Indoors","Outdoors","Underground","Above Ground"]},
+    {label:"Crowding",   tags:["Empty","Low (0-25)","Moderate (25-50)","High (50+)"]},
+    {label:"Traffic",    tags:["Low (0-10 cars)","Moderate (10-20 cars)","High (20+ cars)"]},
+    {label:"Wind",       tags:["Calm (0-5 km/h)","Light (5-15 km/h)","Moderate (15-30 km/h)","Strong (30+ km/h)"]},
+    {label:"Weather",    tags:["Sunny","Cloudy","Overcast","Raining","Foggy"]},
+    {label:"A/C & Heat", tags:["A/C On","A/C Off","Heat On","Heat Off","HVAC On"]},
+    {label:"Air Purifier",tags:["Air Purifier On","Air Purifier Off"]},
+    {label:"Mask",       tags:["Mask On","Mask Off","N95","Surgical Mask","Cloth Mask"]},
+    {label:"Position",   tags:["Front","Middle","Back","Left","Right","Window Seat","Aisle Seat","Standing"]},
+    {label:"Door",       tags:["Door Open","Door Closed","Door Opened Briefly"]},
+    {label:"Cooking",    tags:["Gas Stove","Electric Stove","Oven","BBQ","Frying","Boiling","No Cooking"]},
+    {label:"Fireplace",  tags:["Fireplace On","Fireplace Off","Wood Stove On","Wood Stove Off"]},
+    {label:"Shelter",    tags:["In Shelter","Not in Shelter","Shelter w/ Screen","Shelter No Screen"]},
+    {label:"Vehicle",    tags:["Bus Doors Open","Bus Doors Closed","Near Exhaust","Near Engine"]},
+    {label:"Size",       tags:["Small","Medium","Large","Extra Large"]},
+    {label:"Yes / No",   tags:["Yes","No","N/A"]},
+  ];
+
+  function IVQuickTags(props){
+    // props.value (string), props.onChange(newValue), props.label (field label for context)
+    var ov=useState(null),openIdx=ov[0],setOpenIdx=ov[1];
+    function insertTag(tag){
+      var cur=(props.value||'').trim();
+      var next=cur?cur+', '+tag:tag;
+      props.onChange(next);
+      setOpenIdx(null);
+    }
+    return e('div',{style:{marginBottom:4}},
+      e('div',{style:{display:"flex",gap:3,flexWrap:"wrap",marginBottom:3}},
+        IV_TAG_GROUPS.map(function(group,gi){
+          var isOpen=openIdx===gi;
+          return e('button',{key:gi,
+            onClick:function(){setOpenIdx(isOpen?null:gi);},
+            style:{background:isOpen?"#1e293b":"#0f172a",
+              border:"1px solid "+(isOpen?"#475569":"#1e293b"),
+              borderRadius:4,padding:"2px 7px",fontSize:10,
+              color:isOpen?"#94a3b8":"#475569",
+              fontFamily:"monospace",cursor:"pointer",whiteSpace:"nowrap"}},
+            group.label
+          );
+        })
+      ),
+      openIdx!==null?e('div',{style:{background:"#0f172a",borderRadius:6,padding:"6px 8px",border:"1px solid #334155",display:"flex",gap:4,flexWrap:"wrap",marginBottom:4}},
+        IV_TAG_GROUPS[openIdx].tags.map(function(tag){
+          return e('button',{key:tag,onClick:function(){insertTag(tag);},
+            style:{background:"#1e293b",border:"1px solid #334155",
+              borderRadius:12,padding:"3px 10px",fontSize:11,
+              color:"#94a3b8",fontFamily:"monospace",cursor:"pointer"}},
+            tag
+          );
+        })
+      ):null
+    );
+  }
+
   // ── New Category Modal ────────────────────────────────────────────────────
   var PRESET_ICONS=["🔬","🏙️","🌿","🚗","🏫","🏥","🛒","🎯","🌊","🏔️","💨","🔥","📊","🐾"];
   var PRESET_COLORS=[
@@ -1841,11 +1934,14 @@ window.addEventListener('load', function() {
     var iv=useState("🔬"),icon=iv[0],setIcon=iv[1];
     var cv=useState(PRESET_COLORS[0]),color=cv[0],setColor=cv[1];
     var err=useState(""),error=err[0],setError=err[1];
+    var ilv=useState(["","","",""]),ivLabels=ilv[0],setIvLabels=ilv[1];
+    function setIvLabel(i,v){setIvLabels(function(ls){var n=ls.slice();n[i]=v;return n;});}
     function save(){
       var n=name.trim();
       if(!n){setError("Please enter a section name.");return;}
       if(CATEGORY_META[n]){setError("A section with this name already exists.");return;}
-      props.onSave({name:n,hex:color.hex,text:color.text,icon:icon});
+      var labels=ivLabels.map(function(l){return l.trim();}).filter(Boolean);
+      props.onSave({name:n,hex:color.hex,text:color.text,icon:icon,ivLabels:labels});
     }
     var inp={background:"#1e293b",border:"1px solid #334155",borderRadius:8,padding:"8px 10px",color:"#e2e8f0",fontSize:13,width:"100%",boxSizing:"border-box"};
     var lbl={fontSize:11,color:"#64748b",fontFamily:"monospace",display:"block",marginBottom:4};
@@ -1874,6 +1970,18 @@ window.addEventListener('load', function() {
             PRESET_COLORS.map(function(c,i){
               return e('div',{key:i,onClick:function(){setColor(c);},
                 style:{width:28,height:28,borderRadius:6,background:c.hex,cursor:"pointer",border:"2px solid "+(color.hex===c.hex?"#fff":"transparent")}});
+            })
+          )
+        ),
+        e('div',{style:{marginBottom:14}},
+          e('label',{style:lbl},"Independent Variable Labels (optional)"),
+          e('div',{style:{fontSize:11,color:"#475569",fontFamily:"monospace",marginBottom:6}},"Add up to 4 labels for your IV fields (e.g. Distance, Wind, Position...)"),
+          e('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}},
+            [0,1,2,3].map(function(i){
+              return e('input',{key:i,value:ivLabels[i],
+                onChange:function(ev){setIvLabel(i,ev.target.value);},
+                placeholder:"IV "+(i+1)+" label…",
+                style:Object.assign({},inp,{fontSize:12})});
             })
           )
         ),
@@ -1918,8 +2026,6 @@ window.addEventListener('load', function() {
     document.getElementById('root').innerHTML = '<div style="color:#ef4444;padding:40px;font-family:monospace;font-size:13px;line-height:1.6;"><b>App failed to start.</b><br><br>Error: '+globalErr.message+'<br><br>Try: right-click the HTML file → Open with → Brave or Chrome.</div>';
   }
 });
-</script>
-</body>
 </script>
 </body>
 </html>
