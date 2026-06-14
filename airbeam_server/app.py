@@ -64,7 +64,8 @@ def init_db():
             name TEXT PRIMARY KEY,
             hex  TEXT,
             text_color TEXT,
-            icon TEXT
+            icon TEXT,
+            iv_labels TEXT DEFAULT '[]'
         );
 
         CREATE TABLE IF NOT EXISTS users (
@@ -91,6 +92,10 @@ def migrate_db():
             pass
         try:
             con.execute("ALTER TABLE sessions ADD COLUMN uploaded_by TEXT DEFAULT ''")
+        except:
+            pass
+        try:
+            con.execute("ALTER TABLE custom_categories ADD COLUMN iv_labels TEXT DEFAULT '[]'")
         except:
             pass
         # Seed default users if table is empty
@@ -277,20 +282,39 @@ def set_scenario(category):
     return jsonify({"ok": True})
 
 # ── Custom categories API ─────────────────────────────────────────────────────
+@app.route("/api/categories/<name>/iv-labels", methods=["PUT"])
+def update_iv_labels(name):
+    data = request.get_json()
+    iv_labels = data.get("ivLabels", [])
+    with get_db() as con:
+        # Upsert — works for both custom and built-in categories
+        con.execute("""
+            INSERT INTO custom_categories (name, hex, text_color, icon, iv_labels)
+            VALUES (?, '', '', '', ?)
+            ON CONFLICT(name) DO UPDATE SET iv_labels=excluded.iv_labels
+        """, (name, json.dumps(iv_labels)))
+    return jsonify({"ok": True})
+
 @app.route("/api/categories", methods=["GET"])
 def get_categories():
     with get_db() as con:
         rows = con.execute("SELECT * FROM custom_categories").fetchall()
-    return jsonify([dict(r) for r in rows])
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["ivLabels"] = json.loads(d.pop("iv_labels", "[]") or "[]")
+        result.append(d)
+    return jsonify(result)
 
 @app.route("/api/categories", methods=["POST"])
 def add_category():
     c = request.get_json()
     with get_db() as con:
         con.execute("""
-            INSERT OR IGNORE INTO custom_categories (name,hex,text_color,icon)
-            VALUES (?,?,?,?)
-        """, (c["name"], c["hex"], c["text"], c["icon"]))
+            INSERT OR IGNORE INTO custom_categories (name,hex,text_color,icon,iv_labels)
+            VALUES (?,?,?,?,?)
+        """, (c["name"], c["hex"], c["text"], c["icon"],
+              json.dumps(c.get("ivLabels", []))))
     return jsonify({"ok": True})
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

@@ -925,6 +925,7 @@ window.addEventListener('load', function() {
     function set(k,v){setForm(function(f){var o=Object.assign({},f);o[k]=v;return o;});}
     var inp={background:"#1e293b",border:"1px solid #334155",borderRadius:8,padding:"8px 10px",color:"#e2e8f0",fontSize:13,width:"100%",boxSizing:"border-box"};
     var lbl={fontSize:11,color:"#64748b",fontFamily:"monospace",display:"block",marginBottom:3};
+    var eiv=useState(false),editingIVs=eiv[0],setEditingIVs=eiv[1];
     // Draggable modal
     var posv=useState(null),pos=posv[0],setPos=posv[1];
     var dragRef=useRef(null);
@@ -967,17 +968,74 @@ window.addEventListener('load', function() {
           )
         ),
         e('div',{style:{marginBottom:10}},e('label',{style:lbl},"Location ("+meta.locationHint+")"),e('input',{value:form.location,onChange:function(ev){set("location",ev.target.value);},style:inp,placeholder:meta.locationHint})),
-        meta.ivLabels.length?e('div',{style:{background:"#1e293b",borderRadius:8,padding:10,marginBottom:10}},
-          e('div',{style:{fontSize:10,color:"#64748b",fontFamily:"monospace",marginBottom:8}},"INDEPENDENT VARIABLES"),
-          e('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}},
+        meta.ivLabels.length||!props.viewOnly?e('div',{style:{background:"#1e293b",borderRadius:8,padding:10,marginBottom:10}},
+          e('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}},
+            e('div',{style:{fontSize:10,color:"#64748b",fontFamily:"monospace"}},"INDEPENDENT VARIABLES"),
+            !props.viewOnly?e('div',{style:{display:"flex",gap:6}},
+              meta.ivLabels.length?e('button',{
+                onClick:function(){setEditingIVs(function(v){return !v;});},
+                style:{background:editingIVs?"#334155":"#0f172a",border:"1px solid #334155",borderRadius:6,padding:"3px 10px",fontSize:11,color:editingIVs?"#e2e8f0":"#94a3b8",fontFamily:"monospace",cursor:"pointer"}
+              },editingIVs?"Done":"Edit IVs"):null,
+              meta.ivLabels.length<8?e('button',{
+                onClick:function(){
+                  var label=window.prompt("New independent variable label for "+form.category+":");
+                  if(!label||!label.trim())return;
+                  label=label.trim();
+                  var updated=meta.ivLabels.concat([label]);
+                  CATEGORY_META[form.category]=Object.assign({},meta,{ivLabels:updated});
+                  fetch('/api/categories/'+encodeURIComponent(form.category)+'/iv-labels',{
+                    method:'PUT',
+                    headers:{'Content-Type':'application/json','X-User-Pin':props.pin||''},
+                    body:JSON.stringify({ivLabels:updated})
+                  }).catch(function(){});
+                  setForm(function(f){return Object.assign({},f);});
+                },
+                style:{background:"#0f172a",border:"1px solid #334155",borderRadius:6,padding:"3px 10px",fontSize:11,color:"#94a3b8",fontFamily:"monospace",cursor:"pointer"}
+              },"+ Add IV"):null
+            ):null
+          ),
+          meta.ivLabels.length?e('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}},
             meta.ivLabels.map(function(l,i){
               var ivKey="iv"+(i+1);
+              if(editingIVs){
+                return e('div',{key:i,style:{display:"flex",gap:4,alignItems:"center"}},
+                  e('input',{
+                    value:l,
+                    onChange:function(ev){
+                      var updated=meta.ivLabels.slice();
+                      updated[i]=ev.target.value;
+                      CATEGORY_META[form.category]=Object.assign({},meta,{ivLabels:updated});
+                      fetch('/api/categories/'+encodeURIComponent(form.category)+'/iv-labels',{
+                        method:'PUT',
+                        headers:{'Content-Type':'application/json','X-User-Pin':props.pin||''},
+                        body:JSON.stringify({ivLabels:updated})
+                      }).catch(function(){});
+                      setForm(function(f){return Object.assign({},f);});
+                    },
+                    style:Object.assign({},inp,{fontSize:12,flex:1})
+                  }),
+                  e('button',{
+                    onClick:function(){
+                      if(!window.confirm('Delete IV label "'+l+'"?'))return;
+                      var updated=meta.ivLabels.filter(function(_,j){return j!==i;});
+                      CATEGORY_META[form.category]=Object.assign({},meta,{ivLabels:updated});
+                      fetch('/api/categories/'+encodeURIComponent(form.category)+'/iv-labels',{
+                        method:'PUT',
+                        headers:{'Content-Type':'application/json','X-User-Pin':props.pin||''},
+                        body:JSON.stringify({ivLabels:updated})
+                      }).catch(function(){});
+                      setForm(function(f){return Object.assign({},f);});
+                    },
+                    style:{background:"none",border:"1px solid #7f1d1d",borderRadius:6,padding:"4px 7px",fontSize:11,color:"#ef4444",cursor:"pointer",flexShrink:0}
+                  },"🗑")
+                );
+              }
               return e('div',{key:i},
                 e('label',{style:lbl},l),
                 e(IVQuickTags,{value:form[ivKey],label:l,onChange:function(v){set(ivKey,v);}}),
                 e('input',{value:form[ivKey]||"",onChange:function(ev){set(ivKey,ev.target.value);},style:inp})
               );
-            }))
+            })):e('div',{style:{fontSize:11,color:"#475569",fontFamily:"monospace",textAlign:"center",padding:"8px 0"}},"No IV fields yet — click \"+ Add IV\" to create one")
         ):null,
         e('div',{style:{background:"#1e293b",borderRadius:8,padding:10,marginBottom:10}},
           e('div',{style:{fontSize:10,color:"#64748b",fontFamily:"monospace",marginBottom:8}},"AIR QUALITY"),
@@ -1532,7 +1590,18 @@ window.addEventListener('load', function() {
       ]).then(function(res){
         setSessions(res[0]);setScenarios(res[1]);
         if(res[2]&&res[2].length){
-          res[2].forEach(function(c){if(!CATEGORY_META[c.name])CATEGORY_META[c.name]={hex:c.hex,text:c.text_color||c.text,icon:c.icon,ivLabels:c.ivLabels||[],locationHint:"Location",notesHint:"Notes..."};});
+          res[2].forEach(function(c){
+            if(c.ivLabels&&c.ivLabels.length){
+              if(CATEGORY_META[c.name]){
+                // Override ivLabels for built-in categories too
+                CATEGORY_META[c.name]=Object.assign({},CATEGORY_META[c.name],{ivLabels:c.ivLabels});
+              } else {
+                CATEGORY_META[c.name]={hex:c.hex,text:c.text_color||c.text,icon:c.icon,ivLabels:c.ivLabels,locationHint:"Location",notesHint:"Notes..."};
+              }
+            } else if(!CATEGORY_META[c.name]){
+              CATEGORY_META[c.name]={hex:c.hex,text:c.text_color||c.text,icon:c.icon,ivLabels:[],locationHint:"Location",notesHint:"Notes..."};
+            }
+          });
           setAllCats(ALL_CATS.concat(res[2].map(function(c){return c.name;})));
         }
         setDataLoaded(true);
