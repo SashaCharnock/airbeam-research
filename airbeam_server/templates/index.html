@@ -921,11 +921,30 @@ window.addEventListener('load', function() {
   function Modal(props){
     var blank={category:props.category,date:new Date().toISOString().slice(0,10),time:new Date().toTimeString().slice(0,5),trial:"",location:"",iv1:"",iv2:"",iv3:"",iv4:"",pm1:"",pm25:"",pm10:"",temp:"",humidity:"",notes:"",notePhotos:[]};
     var fs=useState(props.session||blank),form=fs[0],setForm=fs[1];
+    useEffect(function(){setForm(props.session||blank);setEditingIVsRef.current&&setEditingIVsRef.current(false);},[props.session&&props.session.id]);
     var meta=CATEGORY_META[form.category]||CATEGORY_META["For Fun"];
     function set(k,v){setForm(function(f){var o=Object.assign({},f);o[k]=v;return o;});}
     var inp={background:"#1e293b",border:"1px solid #334155",borderRadius:8,padding:"8px 10px",color:"#e2e8f0",fontSize:13,width:"100%",boxSizing:"border-box"};
     var lbl={fontSize:11,color:"#64748b",fontFamily:"monospace",display:"block",marginBottom:3};
     var eiv=useState(false),editingIVs=eiv[0],setEditingIVs=eiv[1];
+    var setEditingIVsRef=useRef(setEditingIVs);
+    setEditingIVsRef.current=setEditingIVs;
+    // Trial navigation (prev/next within the same category)
+    var sessList=props.sessionList||[];
+    var curIdx=props.session?sessList.findIndex(function(s){return s.id===props.session.id;}):-1;
+    var hasPrev=curIdx>0;
+    var hasNext=curIdx>=0&&curIdx<sessList.length-1;
+    function goPrev(){if(hasPrev&&props.onNavigate)props.onNavigate(sessList[curIdx-1]);}
+    function goNext(){if(hasNext&&props.onNavigate)props.onNavigate(sessList[curIdx+1]);}
+    useEffect(function(){
+      function onKey(ev){
+        if(ev.target&&(ev.target.tagName==='INPUT'||ev.target.tagName==='TEXTAREA'))return;
+        if(ev.key==='ArrowLeft')goPrev();
+        if(ev.key==='ArrowRight')goNext();
+      }
+      window.addEventListener('keydown',onKey);
+      return function(){window.removeEventListener('keydown',onKey);};
+    },[curIdx,sessList.length]);
     // Draggable modal
     var posv=useState(null),pos=posv[0],setPos=posv[1];
     var dragRef=useRef(null);
@@ -954,7 +973,16 @@ window.addEventListener('load', function() {
             e('span',{style:{fontSize:12,color:meta.hex+"80",lineHeight:1}},pos?"⠿⠿":"⠿⠿"),
             e('div',{style:{fontSize:15,fontWeight:700,color:meta.hex,fontFamily:"monospace"}},meta.icon+" "+(props.session?"Edit":"New")+" "+form.category)
           ),
-          e('button',{onClick:props.onClose,onMouseDown:function(ev){ev.stopPropagation();},style:{background:"none",border:"none",color:"#64748b",fontSize:22,lineHeight:1,cursor:"pointer"}},"✕")
+          e('div',{style:{display:"flex",alignItems:"center",gap:6}},
+            props.session&&sessList.length>1?e('div',{style:{display:"flex",alignItems:"center",gap:4,marginRight:6}},
+              e('button',{onClick:goPrev,onMouseDown:function(ev){ev.stopPropagation();},disabled:!hasPrev,
+                style:{background:"none",border:"1px solid "+(hasPrev?meta.hex+"60":"#1e293b"),borderRadius:6,padding:"3px 8px",color:hasPrev?meta.hex:"#334155",fontSize:13,cursor:hasPrev?"pointer":"default",lineHeight:1}},"←"),
+              e('span',{style:{fontSize:11,color:"#64748b",fontFamily:"monospace",padding:"0 2px"}},(curIdx+1)+"/"+sessList.length),
+              e('button',{onClick:goNext,onMouseDown:function(ev){ev.stopPropagation();},disabled:!hasNext,
+                style:{background:"none",border:"1px solid "+(hasNext?meta.hex+"60":"#1e293b"),borderRadius:6,padding:"3px 8px",color:hasNext?meta.hex:"#334155",fontSize:13,cursor:hasNext?"pointer":"default",lineHeight:1}},"→")
+            ):null,
+            e('button',{onClick:props.onClose,onMouseDown:function(ev){ev.stopPropagation();},style:{background:"none",border:"none",color:"#64748b",fontSize:22,lineHeight:1,cursor:"pointer"}},"✕")
+          )
         ),
         e('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}},
           e('div',null,e('label',{style:lbl},"Date"),e('input',{type:"date",value:form.date,onChange:function(ev){set("date",ev.target.value);},style:inp})),
@@ -1032,7 +1060,7 @@ window.addEventListener('load', function() {
               }
               return e('div',{key:i},
                 e('label',{style:lbl},l),
-                e(IVQuickTags,{value:form[ivKey],label:l,onChange:function(v){set(ivKey,v);}}),
+                e(IVQuickTags,{value:form[ivKey],label:l,category:form.category,pin:props.pin,viewOnly:props.viewOnly,onChange:function(v){set(ivKey,v);}}),
                 e('input',{value:form[ivKey]||"",onChange:function(ev){set(ivKey,ev.target.value);},style:inp})
               );
             })):e('div',{style:{fontSize:11,color:"#475569",fontFamily:"monospace",textAlign:"center",padding:"8px 0"}},"No IV fields yet — click \"+ Add IV\" to create one")
@@ -1586,7 +1614,8 @@ window.addEventListener('load', function() {
       Promise.all([
         fetch('/api/sessions').then(function(r){return r.json();}),
         fetch('/api/scenarios').then(function(r){return r.json();}),
-        fetch('/api/categories').then(function(r){return r.json();})
+        fetch('/api/categories').then(function(r){return r.json();}),
+        fetch('/api/iv-tags').then(function(r){return r.json();}).catch(function(){return [];})
       ]).then(function(res){
         setSessions(res[0]);setScenarios(res[1]);
         if(res[2]&&res[2].length){
@@ -1603,6 +1632,11 @@ window.addEventListener('load', function() {
             }
           });
           setAllCats(ALL_CATS.concat(res[2].map(function(c){return c.name;})));
+        }
+        if(res[3]&&res[3].length){
+          res[3].forEach(function(t){
+            if(t.tags&&t.tags.length)IV_TAGS_STORE[ivTagsKey(t.category,t.label)]=t.tags;
+          });
         }
         setDataLoaded(true);
       }).catch(function(){setSessions(BAKED_SESSIONS);setDataLoaded(true);});
@@ -1809,7 +1843,7 @@ window.addEventListener('load', function() {
           setScenarios(function(sc){var o=Object.assign({},sc);o[catModal]=v;return o;});
         },
         onAdd:function(c){setModal({category:c});},
-        onEdit:function(s){setModal({category:s.category,session:s});},
+        onEdit:function(s){setModal({category:s.category,session:s,sessionList:filtered.filter(function(x){return x.category===s.category;}).sort(function(a,b){return (a.trial||0)-(b.trial||0);})});},
         onDelete:function(id,cb){
           fetch('/api/sessions/'+id,{method:'DELETE',headers:{'X-User-Pin':userPin}})
             .then(function(r){
@@ -1826,7 +1860,7 @@ window.addEventListener('load', function() {
         seenIds:seenIds,
         onClose:function(){setCatModal(null);}
       }):null,
-      modal?e(Modal,{category:modal.category,session:modal.session,onSave:handleSave,onClose:function(){setModal(null);}}):null,
+      modal?e(Modal,{category:modal.category,session:modal.session,sessionList:modal.sessionList,pin:userPin,onNavigate:function(s){setModal({category:s.category,session:s,sessionList:modal.sessionList});},onSave:handleSave,onClose:function(){setModal(null);}}):null,
       showUserMgmt?e(UserManageModal,{onClose:function(){setShowUserMgmt(false);}}):null,
       showNewCat?e(NewCategoryModal,{
         onSave:function(cat){
@@ -1952,41 +1986,87 @@ window.addEventListener('load', function() {
     {label:"Size",       tags:["Small","Medium","Large","Extra Large"]},
     {label:"Yes / No",   tags:["Yes","No","N/A"]},
   ];
+  // Best-effort default tag list for a given IV label, based on keyword match against the legacy groups.
+  function defaultTagsForLabel(label){
+    var l=(label||"").toLowerCase();
+    var hit=IV_TAG_GROUPS.find(function(g){return l.indexOf(g.label.toLowerCase())!==-1;});
+    if(hit)return hit.tags.slice();
+    // a few extra keyword fallbacks
+    if(l.indexOf('mask')!==-1)return ["Mask On","Mask Off","N95","Surgical Mask","Cloth Mask"];
+    if(l.indexOf('window')!==-1)return ["Windows Open","Windows Closed","1 Window Open","2+ Windows Open"];
+    if(l.indexOf('distance')!==-1)return ["Close (<1m)","Near (1-3m)","Far (3-10m)","Very Far (10m+)"];
+    if(l.indexOf('people')!==-1||l.indexOf('residents')!==-1||l.indexOf('#')!==-1)return ["0","1-2","3-5","6-10","10+"];
+    return ["Yes","No","N/A"];
+  }
+  // In-memory store of custom tags, keyed "category||label" → array of tag strings.
+  // Seeded lazily from defaultTagsForLabel, then editable/persisted per category+label.
+  var IV_TAGS_STORE={};
+  function ivTagsKey(category,label){return category+'||'+label;}
+  function getIvTags(category,label){
+    var k=ivTagsKey(category,label);
+    if(!IV_TAGS_STORE[k])IV_TAGS_STORE[k]=defaultTagsForLabel(label);
+    return IV_TAGS_STORE[k];
+  }
 
   function IVQuickTags(props){
-    // props.value (string), props.onChange(newValue), props.label (field label for context)
-    var ov=useState(null),openIdx=ov[0],setOpenIdx=ov[1];
+    // props.value, props.onChange, props.label, props.category, props.pin
+    var category=props.category, label=props.label;
+    var k=ivTagsKey(category,label);
+    var tv=useState(function(){return getIvTags(category,label);}),tags=tv[0],setTags=tv[1];
+    var ev_=useState(false),editMode=ev_[0],setEditMode=ev_[1];
+    useEffect(function(){setTags(getIvTags(category,label));setEditMode(false);},[k]);
+    function persist(updated){
+      IV_TAGS_STORE[k]=updated;
+      setTags(updated);
+      fetch('/api/categories/'+encodeURIComponent(category)+'/tags/'+encodeURIComponent(label),{
+        method:'PUT',
+        headers:{'Content-Type':'application/json','X-User-Pin':props.pin||''},
+        body:JSON.stringify({tags:updated})
+      }).catch(function(){});
+    }
     function insertTag(tag){
       var cur=(props.value||'').trim();
       var next=cur?cur+', '+tag:tag;
       props.onChange(next);
-      setOpenIdx(null);
+    }
+    function addTag(){
+      var t=window.prompt('New tag for "'+label+'":');
+      if(!t||!t.trim())return;
+      persist(tags.concat([t.trim()]));
+    }
+    function renameTag(i,newVal){
+      var updated=tags.slice();updated[i]=newVal;persist(updated);
+    }
+    function deleteTag(i){
+      if(!window.confirm('Delete tag "'+tags[i]+'"?'))return;
+      persist(tags.filter(function(_,j){return j!==i;}));
     }
     return e('div',{style:{marginBottom:4}},
-      e('div',{style:{display:"flex",gap:3,flexWrap:"wrap",marginBottom:3}},
-        IV_TAG_GROUPS.map(function(group,gi){
-          var isOpen=openIdx===gi;
-          return e('button',{key:gi,
-            onClick:function(){setOpenIdx(isOpen?null:gi);},
-            style:{background:isOpen?"#1e293b":"#0f172a",
-              border:"1px solid "+(isOpen?"#475569":"#1e293b"),
-              borderRadius:4,padding:"2px 7px",fontSize:10,
-              color:isOpen?"#94a3b8":"#475569",
-              fontFamily:"monospace",cursor:"pointer",whiteSpace:"nowrap"}},
-            group.label
-          );
-        })
-      ),
-      openIdx!==null?e('div',{style:{background:"#0f172a",borderRadius:6,padding:"6px 8px",border:"1px solid #334155",display:"flex",gap:4,flexWrap:"wrap",marginBottom:4}},
-        IV_TAG_GROUPS[openIdx].tags.map(function(tag){
-          return e('button',{key:tag,onClick:function(){insertTag(tag);},
+      e('div',{style:{display:"flex",gap:4,flexWrap:"wrap",alignItems:"center"}},
+        tags.map(function(tag,i){
+          if(editMode){
+            return e('div',{key:i,style:{display:"flex",alignItems:"center",gap:2}},
+              e('input',{value:tag,onChange:function(ev){renameTag(i,ev.target.value);},
+                style:{background:"#1e293b",border:"1px solid #334155",borderRadius:10,padding:"2px 8px",fontSize:11,color:"#e2e8f0",fontFamily:"monospace",width:Math.max(50,tag.length*7)}}),
+              e('button',{onClick:function(){deleteTag(i);},
+                style:{background:"none",border:"none",color:"#ef4444",fontSize:11,cursor:"pointer",padding:"0 2px"}},"✕")
+            );
+          }
+          return e('button',{key:i,onClick:function(){insertTag(tag);},
             style:{background:"#1e293b",border:"1px solid #334155",
               borderRadius:12,padding:"3px 10px",fontSize:11,
               color:"#94a3b8",fontFamily:"monospace",cursor:"pointer"}},
             tag
           );
-        })
-      ):null
+        }),
+        !props.viewOnly?e('button',{onClick:function(){editMode?setEditMode(false):addTag();},
+          title:editMode?"Done editing":"Add a new tag",
+          style:{background:"none",border:"1px dashed #334155",borderRadius:12,padding:"3px 8px",fontSize:11,color:"#475569",fontFamily:"monospace",cursor:"pointer"}},
+          editMode?"Done":"+"):null,
+        !props.viewOnly&&!editMode&&tags.length?e('button',{onClick:function(){setEditMode(true);},
+          title:"Edit tags",
+          style:{background:"none",border:"none",fontSize:11,color:"#475569",cursor:"pointer",padding:"0 2px"}},"✎"):null
+      )
     );
   }
 

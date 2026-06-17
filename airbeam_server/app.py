@@ -68,6 +68,13 @@ def init_db():
             iv_labels TEXT DEFAULT '[]'
         );
 
+        CREATE TABLE IF NOT EXISTS custom_iv_tags (
+            category TEXT NOT NULL,
+            label    TEXT NOT NULL,
+            tags     TEXT DEFAULT '[]',
+            PRIMARY KEY (category, label)
+        );
+
         CREATE TABLE IF NOT EXISTS users (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             display_name TEXT NOT NULL,
@@ -305,6 +312,29 @@ def get_categories():
         d["ivLabels"] = json.loads(d.pop("iv_labels", "[]") or "[]")
         result.append(d)
     return jsonify(result)
+
+@app.route("/api/iv-tags", methods=["GET"])
+def get_iv_tags():
+    with get_db() as con:
+        rows = con.execute("SELECT category, label, tags FROM custom_iv_tags").fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["tags"] = json.loads(d.get("tags", "[]") or "[]")
+        result.append(d)
+    return jsonify(result)
+
+@app.route("/api/categories/<category>/tags/<label>", methods=["PUT"])
+def update_iv_tags(category, label):
+    data = request.get_json()
+    tags = data.get("tags", [])
+    with get_db() as con:
+        con.execute("""
+            INSERT INTO custom_iv_tags (category, label, tags)
+            VALUES (?, ?, ?)
+            ON CONFLICT(category, label) DO UPDATE SET tags=excluded.tags
+        """, (category, label, json.dumps(tags)))
+    return jsonify({"ok": True})
 
 @app.route("/api/categories", methods=["POST"])
 def add_category():
