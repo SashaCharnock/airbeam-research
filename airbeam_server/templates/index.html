@@ -848,7 +848,17 @@ window.addEventListener('load', function() {
 
   function SessionRow(props){
     var sess=props.s,meta=props.meta;
-    var xp=useState(false),expanded=xp[0],setExpanded=xp[1];
+    var xp=useState(false),localExpanded=xp[0],setLocalExpanded=xp[1];
+    var controlled=props.expandedId!==undefined;
+    var expanded=controlled?(props.expandedId===sess.id):localExpanded;
+    function setExpanded(updater){
+      if(controlled){
+        var next=typeof updater==='function'?updater(expanded):updater;
+        props.onSetExpanded(next?sess.id:null);
+      } else {
+        setLocalExpanded(updater);
+      }
+    }
     var am=useState("pm25"),activeMetric=am[0],setActiveMetric=am[1];
     var qav=useState(false),qaOpen=qav[0],setQaOpen=qav[1];
     var mav=useState(false),mapBadgeOpen=mav[0],setMapBadgeOpen=mav[1];
@@ -859,10 +869,33 @@ window.addEventListener('load', function() {
     function openQA(){setQaOpen(true);try{localStorage.setItem(qaSeenKey,String(qaThread.length));}catch(e){}}
     var pc=getBandColor(sess.pm25,"pm25");
     var inp={background:"#0f172a",border:"1px solid #334155",borderRadius:6,padding:"5px 8px",color:"#e2e8f0",fontSize:12,width:"100%",boxSizing:"border-box"};
+    // Trial navigation (prev/next within sessionList, only when controlled+expanded)
+    var sessList=props.sessionList||[];
+    var curIdx=sessList.findIndex(function(s){return s.id===sess.id;});
+    var hasPrev=curIdx>0;
+    var hasNext=curIdx>=0&&curIdx<sessList.length-1;
+    function goPrev(ev){ev.stopPropagation();if(hasPrev&&props.onSetExpanded)props.onSetExpanded(sessList[curIdx-1].id);}
+    function goNext(ev){ev.stopPropagation();if(hasNext&&props.onSetExpanded)props.onSetExpanded(sessList[curIdx+1].id);}
+    useEffect(function(){
+      if(!expanded)return;
+      function onKey(ev){
+        if(ev.target&&(ev.target.tagName==='INPUT'||ev.target.tagName==='TEXTAREA'))return;
+        if(ev.key==='ArrowLeft')goPrev(ev);
+        if(ev.key==='ArrowRight')goNext(ev);
+      }
+      window.addEventListener('keydown',onKey);
+      return function(){window.removeEventListener('keydown',onKey);};
+    },[expanded,curIdx,sessList.length]);
     return e('div',{style:{background:"#1e293b",borderRadius:10,marginBottom:8,border:"1px solid #334155",overflow:"hidden"}},
       e('div',{onClick:function(){setExpanded(function(x){return!x;});},
         style:{display:"flex",alignItems:"center",gap:8,padding:"11px 14px",cursor:"pointer",userSelect:"none"}},
         e('div',{style:{width:8,height:8,borderRadius:"50%",background:pc,flexShrink:0,boxShadow:"0 0 5px "+pc}}),
+        expanded&&sessList.length>1?e('div',{style:{display:"flex",alignItems:"center",gap:3,marginRight:2}},
+          e('button',{onClick:goPrev,disabled:!hasPrev,
+            style:{background:"none",border:"1px solid "+(hasPrev?meta.hex+"60":"#334155"),borderRadius:5,padding:"1px 6px",color:hasPrev?meta.hex:"#334155",fontSize:11,cursor:hasPrev?"pointer":"default",lineHeight:1.4}},"←"),
+          e('button',{onClick:goNext,disabled:!hasNext,
+            style:{background:"none",border:"1px solid "+(hasNext?meta.hex+"60":"#334155"),borderRadius:5,padding:"1px 6px",color:hasNext?meta.hex:"#334155",fontSize:11,cursor:hasNext?"pointer":"default",lineHeight:1.4}},"→")
+        ):null,
         e('span',{style:{fontFamily:"monospace",fontSize:11,color:"#94a3b8",minWidth:58}},"Trial "+(sess.trial||"—")),
         sess.uploadedBy?e('div',{style:{background:nameColor(sess.uploadedBy),borderRadius:4,padding:"1px 6px",fontSize:9,fontWeight:700,color:"#fff",flexShrink:0,fontFamily:"monospace",whiteSpace:"nowrap"}},sess.uploadedBy):null,
         e('span',{style:{fontFamily:"monospace",fontSize:11,color:"#64748b",minWidth:84}}),sess.date,
@@ -900,7 +933,7 @@ window.addEventListener('load', function() {
         qaOpen?e(QAModal,{thread:qaThread,role:props.role,displayName:props.displayName,sessionId:sess.id,trial:sess.trial,category:sess.category,uploadedBy:sess.uploadedBy,onPost:props.onUpdateQA,onClose:function(){setQaOpen(false);try{localStorage.setItem(qaSeenKey,String(qaThread.length));}catch(e){}}}):null,
         mapBadgeOpen?RD.createPortal(e(MapModal,{gpsPath:sess.gpsPath,noteMarkers:sess.noteMarkers,sessionId:sess.id,viewOnly:props.viewOnly,onUpdateNotes:props.onUpdateNotes,onClose:function(){setMapBadgeOpen(false);}}),document.body):null,
         meta.ivLabels.map(function(lbl,i){
-          var val=[sess.iv1,sess.iv2,sess.iv3,sess.iv4][i];
+          var val=getSessIvVal(sess,i);
           if(!val)return null;
           return e('span',{key:i,style:{display:"inline-block",background:"#0f172a",borderRadius:6,padding:"3px 10px",fontSize:12,marginRight:6,marginBottom:6}},
             e('span',{style:{color:"#64748b"}},lbl+": "),e('span',{style:{color:"#e2e8f0"}},val));
@@ -919,11 +952,32 @@ window.addEventListener('load', function() {
   }
 
   function Modal(props){
-    var blank={category:props.category,date:new Date().toISOString().slice(0,10),time:new Date().toTimeString().slice(0,5),trial:"",location:"",iv1:"",iv2:"",iv3:"",iv4:"",pm1:"",pm25:"",pm10:"",temp:"",humidity:"",notes:"",notePhotos:[]};
+    var blank={category:props.category,date:new Date().toISOString().slice(0,10),time:new Date().toTimeString().slice(0,5),trial:"",location:"",iv1:"",iv2:"",iv3:"",iv4:"",ivExtra:{},pm1:"",pm25:"",pm10:"",temp:"",humidity:"",notes:"",notePhotos:[]};
     var fs=useState(props.session||blank),form=fs[0],setForm=fs[1];
-    useEffect(function(){setForm(props.session||blank);setEditingIVsRef.current&&setEditingIVsRef.current(false);},[props.session&&props.session.id]);
+    useEffect(function(){
+      var s=props.session?Object.assign({},blank,props.session,{ivExtra:Object.assign({},props.session.ivExtra||{})}):blank;
+      setForm(s);
+      setEditingIVsRef.current&&setEditingIVsRef.current(false);
+    },[props.session&&props.session.id]);
     var meta=CATEGORY_META[form.category]||CATEGORY_META["For Fun"];
     function set(k,v){setForm(function(f){var o=Object.assign({},f);o[k]=v;return o;});}
+    // IV fields beyond the 4th are stored in form.ivExtra (an object keyed "iv5","iv6",...)
+    // since the database only has 4 dedicated iv1-4 columns.
+    function getIvVal(i){
+      var ivKey="iv"+(i+1);
+      if(i<4)return form[ivKey];
+      return (form.ivExtra||{})[ivKey]||"";
+    }
+    function setIvVal(i,v){
+      var ivKey="iv"+(i+1);
+      if(i<4){set(ivKey,v);return;}
+      setForm(function(f){
+        var o=Object.assign({},f);
+        o.ivExtra=Object.assign({},o.ivExtra||{});
+        o.ivExtra[ivKey]=v;
+        return o;
+      });
+    }
     var inp={background:"#1e293b",border:"1px solid #334155",borderRadius:8,padding:"8px 10px",color:"#e2e8f0",fontSize:13,width:"100%",boxSizing:"border-box"};
     var lbl={fontSize:11,color:"#64748b",fontFamily:"monospace",display:"block",marginBottom:3};
     var eiv=useState(false),editingIVs=eiv[0],setEditingIVs=eiv[1];
@@ -1060,8 +1114,8 @@ window.addEventListener('load', function() {
               }
               return e('div',{key:i},
                 e('label',{style:lbl},l),
-                e(IVQuickTags,{value:form[ivKey],label:l,category:form.category,pin:props.pin,viewOnly:props.viewOnly,onChange:function(v){set(ivKey,v);}}),
-                e('input',{value:form[ivKey]||"",onChange:function(ev){set(ivKey,ev.target.value);},style:inp})
+                e(IVQuickTags,{value:getIvVal(i),label:l,category:form.category,pin:props.pin,viewOnly:props.viewOnly,onChange:function(v){setIvVal(i,v);}}),
+                e('input',{value:getIvVal(i)||"",onChange:function(ev){setIvVal(i,ev.target.value);},style:inp})
               );
             })):e('div',{style:{fontSize:11,color:"#475569",fontFamily:"monospace",textAlign:"center",padding:"8px 0"}},"No IV fields yet — click \"+ Add IV\" to create one")
         ):null,
@@ -1175,7 +1229,7 @@ window.addEventListener('load', function() {
         e('div',{style:{padding:"12px 16px"}},
           props.sessions.length===0?e('div',{style:{textAlign:"center",padding:"24px 0",color:"#334155",fontFamily:"monospace",fontSize:12}},"No sessions yet — upload xlsx files or click + Add"):
           props.sessions.map(function(sess){
-            return e(SessionRow,{key:sess.id,s:sess,meta:meta,viewOnly:props.viewOnly,role:props.role,displayName:props.displayName,customScales:catScales,onUpdateCategoryScales:updateCategoryScales,onEdit:props.onEdit,onDelete:props.onDelete,onUpdatePhotos:props.onUpdatePhotos,onUpdateNotes:props.onUpdateNotes,onUpdateQA:props.onUpdateQA});
+            return e(SessionRow,{key:sess.id,s:sess,meta:meta,viewOnly:props.viewOnly,role:props.role,displayName:props.displayName,customScales:catScales,onUpdateCategoryScales:updateCategoryScales,onEdit:props.onEdit,onDelete:props.onDelete,onUpdatePhotos:props.onUpdatePhotos,onUpdateNotes:props.onUpdateNotes,onUpdateQA:props.onUpdateQA,sessionList:props.sessions,expandedId:expandedRowId,onSetExpanded:setExpandedRowId});
           })
         )
       ):null,
@@ -1220,6 +1274,7 @@ window.addEventListener('load', function() {
     var qav=useState(false),qaOpen=qav[0],setQaOpen=qav[1];
     var mav=useState(false),mapOpen=mav[0],setMapOpen=mav[1];
     var cdv=useState(false),confirmDel=cdv[0],setConfirmDel=cdv[1];
+    var erv=useState(null),expandedRowId=erv[0],setExpandedRowId=erv[1];
     var scKey='ab_scales_'+(props.userKey||'guest')+'_'+props.category;
     var scv_=useState(function(){try{var r=localStorage.getItem(scKey);return r?JSON.parse(r):null;}catch(e){return null;}}),catScales=scv_[0],setCatScales=scv_[1];
     function updateCategoryScales(metric,thresholds){
@@ -1330,7 +1385,7 @@ window.addEventListener('load', function() {
             )
           ),
           meta.ivLabels&&meta.ivLabels.map(function(lbl,i){
-            var val=[freshSess.iv1,freshSess.iv2,freshSess.iv3,freshSess.iv4][i];
+            var val=getSessIvVal(freshSess,i);
             if(!val)return null;
             return e('span',{key:i,style:{display:"inline-block",background:"#1e293b",borderRadius:6,padding:"3px 10px",fontSize:12,marginRight:6,marginBottom:6}},
               e('span',{style:{color:"#64748b"}},lbl+": "),e('span',{style:{color:"#e2e8f0"}},val));
@@ -1967,6 +2022,10 @@ window.addEventListener('load', function() {
   }
 
   // ── IV Quick Tags (per-field tag groups for independent variables) ────────
+  function getSessIvVal(sess,i){
+    if(i<4)return [sess.iv1,sess.iv2,sess.iv3,sess.iv4][i];
+    return (sess.ivExtra||{})["iv"+(i+1)]||"";
+  }
   var IV_TAG_GROUPS = [
     {label:"Windows",    tags:["Windows Open","Windows Closed","1 Window Open","2+ Windows Open"]},
     {label:"Location",   tags:["Indoors","Outdoors","Underground","Above Ground"]},

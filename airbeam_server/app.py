@@ -42,6 +42,7 @@ def init_db():
             iv2       TEXT DEFAULT '',
             iv3       TEXT DEFAULT '',
             iv4       TEXT DEFAULT '',
+            iv_extra  TEXT DEFAULT '{}',
             pm1       REAL,
             pm25      REAL,
             pm10      REAL,
@@ -105,6 +106,10 @@ def migrate_db():
             con.execute("ALTER TABLE custom_categories ADD COLUMN iv_labels TEXT DEFAULT '[]'")
         except:
             pass
+        try:
+            con.execute("ALTER TABLE sessions ADD COLUMN iv_extra TEXT DEFAULT '{}'")
+        except:
+            pass
         # Seed default users if table is empty
         count = con.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         if count == 0:
@@ -135,6 +140,7 @@ def get_sessions():
         s["qaThread"]     = json.loads(s.pop("qa_thread",    "[]") or "[]")
         s["maxPm25"]      = s.pop("max_pm25", None)
         s["uploadedBy"]   = s.pop("uploaded_by", "") or ""
+        s["ivExtra"]      = json.loads(s.pop("iv_extra", "{}") or "{}")
         sessions.append(s)
     return jsonify(sessions)
 
@@ -147,9 +153,9 @@ def upsert_sessions():
         for s in sessions:
             con.execute("""
                 INSERT INTO sessions
-                  (sheet,category,name,date,time,trial,location,iv1,iv2,iv3,iv4,
+                  (sheet,category,name,date,time,trial,location,iv1,iv2,iv3,iv4,iv_extra,
                    pm1,pm25,pm10,temp,humidity,notes,max_pm25,time_series,note_markers,note_photos,gps_path,qa_thread,uploaded_by)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(sheet) DO UPDATE SET
                   time_series=excluded.time_series,
                   note_markers=excluded.note_markers,
@@ -170,7 +176,7 @@ def upsert_sessions():
                 s.get("sheet"), s.get("category"), s.get("name"),
                 s.get("date"), s.get("time"), s.get("trial",""),
                 s.get("location",""), s.get("iv1",""), s.get("iv2",""),
-                s.get("iv3",""), s.get("iv4",""),
+                s.get("iv3",""), s.get("iv4",""), json.dumps(s.get("ivExtra",{})),
                 s.get("pm1"), s.get("pm25"), s.get("pm10"),
                 s.get("temp"), s.get("humidity"), s.get("notes",""),
                 s.get("maxPm25"),
@@ -207,7 +213,7 @@ def update_session(sid):
         new_category = s.get("category", existing.get("category",""))
         con.execute("""
             UPDATE sessions SET
-              category=?, location=?, iv1=?, iv2=?, iv3=?, iv4=?,
+              category=?, location=?, iv1=?, iv2=?, iv3=?, iv4=?, iv_extra=?,
               notes=?, trial=?, note_photos=?, note_markers=?, qa_thread=?,
               pm1=?, pm25=?, pm10=?, temp=?, humidity=?
             WHERE id=?
@@ -218,6 +224,7 @@ def update_session(sid):
             s.get("iv2",     existing.get("iv2","")),
             s.get("iv3",     existing.get("iv3","")),
             s.get("iv4",     existing.get("iv4","")),
+            json.dumps(s.get("ivExtra", json.loads(existing.get("iv_extra","{}") or "{}"))),
             s.get("notes",   existing.get("notes","")),
             s.get("trial",   existing.get("trial","")),
             json.dumps(s.get("notePhotos",   json.loads(existing.get("note_photos",  "[]") or "[]"))),
@@ -252,15 +259,15 @@ def add_session():
     with get_db() as con:
         cur = con.execute("""
             INSERT INTO sessions
-              (sheet,category,name,date,time,trial,location,iv1,iv2,iv3,iv4,
+              (sheet,category,name,date,time,trial,location,iv1,iv2,iv3,iv4,iv_extra,
                pm1,pm25,pm10,temp,humidity,notes,max_pm25,time_series,note_markers,note_photos,uploaded_by)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             s.get("sheet", "manual_"+str(os.urandom(4).hex())),
             s.get("category"), s.get("name",""),
             s.get("date"), s.get("time"), s.get("trial",""),
             s.get("location",""), s.get("iv1",""), s.get("iv2",""),
-            s.get("iv3",""), s.get("iv4",""),
+            s.get("iv3",""), s.get("iv4",""), json.dumps(s.get("ivExtra",{})),
             s.get("pm1"), s.get("pm25"), s.get("pm10"),
             s.get("temp"), s.get("humidity"), s.get("notes",""),
             s.get("maxPm25"),
