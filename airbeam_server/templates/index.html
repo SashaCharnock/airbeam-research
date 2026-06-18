@@ -1290,6 +1290,23 @@ window.addEventListener('load', function() {
     var qaThread=freshSess?(freshSess.qaThread||[]):[];
     var qaSeenKey=freshSess?'ab_qa_seen_'+(props.role||'viewer')+'_'+freshSess.id:'';
     var canEdit=freshSess&&!props.viewOnly&&(props.role==='admin'||freshSess.uploadedBy===props.displayName);
+    // Trial navigation (prev/next within this category's sessions, sorted by trial number)
+    var navList=props.sessions;
+    var navIdx=freshSess?navList.findIndex(function(s){return s.id===freshSess.id;}):-1;
+    var navHasPrev=navIdx>0;
+    var navHasNext=navIdx>=0&&navIdx<navList.length-1;
+    function navGoPrev(){if(navHasPrev)pickSess(navList[navIdx-1]);}
+    function navGoNext(){if(navHasNext)pickSess(navList[navIdx+1]);}
+    useEffect(function(){
+      if(!selSess)return;
+      function onKey(ev){
+        if(ev.target&&(ev.target.tagName==='INPUT'||ev.target.tagName==='TEXTAREA'))return;
+        if(ev.key==='ArrowLeft')navGoPrev();
+        if(ev.key==='ArrowRight')navGoNext();
+      }
+      window.addEventListener('keydown',onKey);
+      return function(){window.removeEventListener('keydown',onKey);};
+    },[selSess&&selSess.id,navIdx,navList.length]);
 
     // ── list view ──
     if(!selSess){
@@ -1355,6 +1372,13 @@ window.addEventListener('load', function() {
       e('div',{style:{background:"#0f172a",borderRadius:16,width:"100%",maxWidth:760,maxHeight:"93vh",display:"flex",flexDirection:"column",border:"2px solid "+meta.hex+"50",overflow:"hidden"}},
         e('div',{style:{background:meta.hex,padding:"11px 16px",display:"flex",alignItems:"center",gap:10,flexShrink:0}},
           e('button',{onClick:function(){setSelSess(null);},style:{background:"#0004",border:"1px solid "+meta.text+"40",borderRadius:6,padding:"4px 10px",color:meta.text,fontSize:12,cursor:"pointer",flexShrink:0}},"← Back"),
+          navList.length>1?e('div',{style:{display:"flex",alignItems:"center",gap:4,flexShrink:0}},
+            e('button',{onClick:navGoPrev,disabled:!navHasPrev,
+              style:{background:"#0004",border:"1px solid "+meta.text+"40",borderRadius:6,padding:"4px 9px",color:navHasPrev?meta.text:meta.text+"50",fontSize:13,cursor:navHasPrev?"pointer":"default",lineHeight:1}},"←"),
+            e('span',{style:{fontSize:10,color:meta.text+"99",fontFamily:"monospace",minWidth:32,textAlign:"center"}},(navIdx+1)+"/"+navList.length),
+            e('button',{onClick:navGoNext,disabled:!navHasNext,
+              style:{background:"#0004",border:"1px solid "+meta.text+"40",borderRadius:6,padding:"4px 9px",color:navHasNext?meta.text:meta.text+"50",fontSize:13,cursor:navHasNext?"pointer":"default",lineHeight:1}},"→")
+          ):null,
           e('div',{style:{flex:1,minWidth:0}},
             e('div',{style:{fontWeight:700,fontSize:13,color:meta.text,fontFamily:"monospace",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},meta.icon+" "+props.category+" · Trial "+(freshSess.trial||"—")),
             e('div',{style:{fontSize:11,color:meta.text+"99",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},freshSess.date+(freshSess.time?" · "+freshSess.time:"")+(freshSess.location?" · "+freshSess.location:""))
