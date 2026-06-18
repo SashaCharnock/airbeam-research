@@ -1710,7 +1710,8 @@ window.addEventListener('load', function() {
               CATEGORY_META[c.name]={hex:c.hex,text:c.text_color||c.text,icon:c.icon,ivLabels:[],locationHint:"Location",notesHint:"Notes..."};
             }
           });
-          setAllCats(ALL_CATS.concat(res[2].map(function(c){return c.name;})));
+          var newNames=res[2].map(function(c){return c.name;}).filter(function(n){return ALL_CATS.indexOf(n)===-1;});
+          setAllCats(ALL_CATS.concat(newNames));
         }
         if(res[3]&&res[3].length){
           res[3].forEach(function(t){
