@@ -110,6 +110,14 @@ def migrate_db():
             con.execute("ALTER TABLE sessions ADD COLUMN iv_extra TEXT DEFAULT '{}'")
         except:
             pass
+        try:
+            con.execute("ALTER TABLE custom_categories ADD COLUMN display_name TEXT DEFAULT ''")
+        except:
+            pass
+        try:
+            con.execute("ALTER TABLE custom_categories ADD COLUMN hidden INTEGER DEFAULT 0")
+        except:
+            pass
         # Seed default users if table is empty
         count = con.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         if count == 0:
@@ -317,6 +325,8 @@ def get_categories():
     for r in rows:
         d = dict(r)
         d["ivLabels"] = json.loads(d.pop("iv_labels", "[]") or "[]")
+        d["displayName"] = d.pop("display_name", "") or ""
+        d["hidden"] = bool(d.get("hidden", 0))
         result.append(d)
     return jsonify(result)
 
@@ -352,6 +362,45 @@ def add_category():
             VALUES (?,?,?,?,?)
         """, (c["name"], c["hex"], c["text"], c["icon"],
               json.dumps(c.get("ivLabels", []))))
+    return jsonify({"ok": True})
+
+@app.route("/api/categories/<name>/rename", methods=["PATCH"])
+def rename_category(name):
+    if not _is_admin():
+        return jsonify({"error": "Unauthorized"}), 403
+    data = request.get_json()
+    new_display = (data.get("displayName") or "").strip()
+    if not new_display:
+        return jsonify({"ok": False, "error": "Name required"}), 400
+    with get_db() as con:
+        con.execute("""
+            INSERT INTO custom_categories (name, hex, text_color, icon, iv_labels, display_name)
+            VALUES (?, '', '', '', '[]', ?)
+            ON CONFLICT(name) DO UPDATE SET display_name=excluded.display_name
+        """, (name, new_display))
+    return jsonify({"ok": True})
+
+@app.route("/api/categories/<name>", methods=["DELETE"])
+def delete_category(name):
+    if not _is_admin():
+        return jsonify({"error": "Unauthorized"}), 403
+    with get_db() as con:
+        row = con.execute("SELECT * FROM custom_categories WHERE name=?", (name,)).fetchone()
+        if row:
+            # If it came from custom_categories, check if it's truly custom
+            # (built-ins may have been written there for iv_labels etc.)
+            # We soft-delete by setting hidden=1 so data is preserved
+            con.execute("""
+                INSERT INTO custom_categories (name, hex, text_color, icon, iv_labels, hidden)
+                VALUES (?, '', '', '', '[]', 1)
+                ON CONFLICT(name) DO UPDATE SET hidden=1
+            """, (name,))
+        else:
+            # No row yet for a built-in: create a hidden tombstone
+            con.execute("""
+                INSERT OR IGNORE INTO custom_categories (name, hex, text_color, icon, iv_labels, hidden)
+                VALUES (?, '', '', '', '[]', 1)
+            """, (name,))
     return jsonify({"ok": True})
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

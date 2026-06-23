@@ -51,6 +51,8 @@ window.addEventListener('load', function() {
     "For Fun":            {hex:"#FF99CC",text:"#5a0030",icon:"✨",ivLabels:["Crowding"],locationHint:"Location",notesHint:"Anything interesting..."}
   };
   var ALL_CATS=Object.keys(CATEGORY_META);
+  if(!window.CAT_DISPLAY_NAMES)window.CAT_DISPLAY_NAMES={};
+  function getCatDisplayName(cat){return window.CAT_DISPLAY_NAMES[cat]||cat;}
   var PM_BANDS={
     pm25:{thresholds:[12,35,55,150],label:"PM2.5 µg/m³",unit:"µg/m³"},
     pm10:{thresholds:[20,50,100,200],label:"PM10 µg/m³",unit:"µg/m³"},
@@ -1241,25 +1243,39 @@ window.addEventListener('load', function() {
   function CategoryCard(props){
     var meta=props.meta;
     var hv=useState(false),hover=hv[0],setHover=hv[1];
+    var cdv=useState(false),confirmDel=cdv[0],setConfirmDel=cdv[1];
     var withPm=props.sessions.filter(function(s){return s.pm25!=null;});
     var ap=withPm.length?(withPm.reduce(function(a,b){return a+b.pm25;},0)/withPm.length):null;
     var pc=ap!=null?getBandColor(ap,"pm25"):null;
     var cur=props.unlocked?"grab":"pointer";
-    return e('div',{onClick:props.onClick,onMouseEnter:function(){setHover(true);},onMouseLeave:function(){setHover(false);},
+    var isAdmin=props.role==='admin';
+    var displayName=getCatDisplayName(props.category);
+    return e('div',{onClick:function(ev){if(confirmDel)return;if(props.onClick)props.onClick(ev);},
+      onMouseEnter:function(){setHover(true);},onMouseLeave:function(){setHover(false);},
       style:{position:"relative",background:hover?"#1e293b":"#131e2e",border:"2px solid "+(hover?meta.hex:meta.hex+"50"),borderRadius:16,
         padding:"26px 20px",cursor:cur,transition:"all 0.15s",display:"flex",flexDirection:"column",gap:8,minHeight:180,userSelect:"none"}},
       props.unlocked?e('div',{style:{position:"absolute",top:8,right:10,fontSize:14,color:"#475569",lineHeight:1}},"⠿⠿"):null,
+      isAdmin&&!props.unlocked?e('button',{
+        onClick:function(ev){ev.stopPropagation();setConfirmDel(true);},
+        title:"Delete section",
+        style:{position:"absolute",top:8,right:10,background:"none",border:"none",color:"#475569",fontSize:14,cursor:"pointer",lineHeight:1,padding:2,opacity:hover?1:0,transition:"opacity 0.15s"}
+      },"🗑"):null,
       props.newCount>0&&!props.unlocked?e('div',{style:{position:"absolute",top:-8,right:-8,background:"#dc2626",color:"#fff",borderRadius:12,padding:"2px 8px",fontSize:10,fontWeight:700,fontFamily:"monospace",border:"2px solid #0a0f1a",boxShadow:"0 0 8px #dc262660",whiteSpace:"nowrap"}},props.newCount+" new"):null,
       props.newQaCount>0&&!props.unlocked?e('div',{style:{position:"absolute",top:-8,left:-8,background:"#6d28d9",color:"#e9d5ff",borderRadius:12,padding:"2px 8px",fontSize:10,fontWeight:700,fontFamily:"monospace",border:"2px solid #0a0f1a",boxShadow:"0 0 8px #7c3aed60",whiteSpace:"nowrap"}},"💬 "+props.newQaCount):null,
       e('div',{style:{fontSize:34,lineHeight:1}},meta.icon),
-      e('div',{style:{fontWeight:700,fontSize:15,color:meta.hex,fontFamily:"monospace",marginTop:6,lineHeight:1.3}},props.category),
+      e('div',{style:{fontWeight:700,fontSize:15,color:meta.hex,fontFamily:"monospace",marginTop:6,lineHeight:1.3}},displayName),
       e('div',{style:{fontSize:12,color:"#64748b",fontFamily:"monospace"}},props.sessions.length+" trial"+(props.sessions.length!==1?"s":"")),
       ap!=null?e('div',{style:{marginTop:"auto",display:"flex",gap:6}},
         e('div',{style:{background:"#0f172a",borderRadius:6,padding:"2px 8px",fontSize:11,fontFamily:"monospace",border:"1px solid #334155"}},
           e('span',{style:{color:"#475569"}},"avg "),
           e('span',{style:{color:pc,fontWeight:700}},ap.toFixed(1)+" µg/m³")
         )
-      ):e('div',{style:{marginTop:"auto",fontSize:10,color:"#334155",fontFamily:"monospace"}},"no data")
+      ):e('div',{style:{marginTop:"auto",fontSize:10,color:"#334155",fontFamily:"monospace"}},"no data"),
+      confirmDel?e(ConfirmModal,{
+        msg:"Delete the \""+displayName+"\" section? Sessions are kept but the section will be hidden.",
+        onConfirm:function(){if(props.onDelete)props.onDelete(props.category);setConfirmDel(false);},
+        onClose:function(){setConfirmDel(false);}
+      }):null
     );
   }
 
@@ -1275,6 +1291,19 @@ window.addEventListener('load', function() {
     var mav=useState(false),mapOpen=mav[0],setMapOpen=mav[1];
     var cdv=useState(false),confirmDel=cdv[0],setConfirmDel=cdv[1];
     var erv=useState(null),expandedRowId=erv[0],setExpandedRowId=erv[1];
+    // Inline rename state
+    var rnv=useState(false),renamingTitle=rnv[0],setRenamingTitle=rnv[1];
+    var rndv=useState(getCatDisplayName(props.category)),renameVal=rndv[0],setRenameVal=rndv[1];
+    function saveRename(){
+      var v=renameVal.trim();
+      if(!v){setRenamingTitle(false);return;}
+      window.CAT_DISPLAY_NAMES[props.category]=v;
+      fetch('/api/categories/'+encodeURIComponent(props.category)+'/rename',{method:'PATCH',headers:{'Content-Type':'application/json','X-Admin-Pin':props.adminPin||''},body:JSON.stringify({displayName:v})}).catch(function(){});
+      setRenamingTitle(false);
+      if(props.onRename)props.onRename(props.category,v);
+    }
+    var isAdmin=props.role==='admin';
+    var displayedCatName=getCatDisplayName(props.category);
     var scKey='ab_scales_'+(props.userKey||'guest')+'_'+props.category;
     var scv_=useState(function(){try{var r=localStorage.getItem(scKey);return r?JSON.parse(r):null;}catch(e){return null;}}),catScales=scv_[0],setCatScales=scv_[1];
     function updateCategoryScales(metric,thresholds){
@@ -1315,11 +1344,35 @@ window.addEventListener('load', function() {
           e('div',{style:{background:meta.hex,padding:"13px 16px",display:"flex",alignItems:"center",gap:10,flexShrink:0}},
             e('span',{style:{fontSize:18}},meta.icon),
             e('div',{style:{flex:1}},
-              e('div',{style:{fontWeight:700,fontSize:14,color:meta.text,fontFamily:"monospace"}},props.category),
+              renamingTitle&&isAdmin
+                ? e('div',{style:{display:"flex",gap:6,alignItems:"center"}},
+                    e('input',{autoFocus:true,value:renameVal,
+                      onChange:function(ev){setRenameVal(ev.target.value);},
+                      onKeyDown:function(ev){if(ev.key==="Enter")saveRename();if(ev.key==="Escape"){setRenamingTitle(false);setRenameVal(getCatDisplayName(props.category));}},
+                      style:{background:"#fff3",border:"1px solid "+meta.text+"60",borderRadius:6,padding:"3px 8px",color:meta.text,fontSize:14,fontWeight:700,fontFamily:"monospace",flex:1}}),
+                    e('button',{onClick:saveRename,style:{background:meta.text+"30",border:"none",borderRadius:6,padding:"3px 10px",color:meta.text,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}},"Save"),
+                    e('button',{onClick:function(){setRenamingTitle(false);setRenameVal(getCatDisplayName(props.category));},style:{background:"none",border:"none",color:meta.text+"90",fontSize:12,cursor:"pointer"}},"Cancel")
+                  )
+                : e('div',{style:{display:"flex",alignItems:"center",gap:6}},
+                    e('div',{style:{fontWeight:700,fontSize:14,color:meta.text,fontFamily:"monospace"}},displayedCatName),
+                    isAdmin?e('button',{onClick:function(){setRenamingTitle(true);setRenameVal(getCatDisplayName(props.category));},title:"Rename section",
+                      style:{background:"none",border:"none",color:meta.text+"80",fontSize:12,cursor:"pointer",padding:"0 2px",lineHeight:1}},"✎"):null
+                  ),
               e('div',{style:{fontSize:11,color:meta.text+"99"}},props.sessions.length+" trial"+(props.sessions.length!==1?"s":"")+(ap?" · avg PM2.5: "+ap+" µg/m³":""))
             ),
             e('button',{onClick:function(){setShowScaleModal(true);},style:{background:"#fff2",border:"1px solid "+meta.text+"40",borderRadius:6,padding:"4px 8px",color:meta.text,fontSize:11,marginRight:4,fontFamily:"monospace",cursor:"pointer"}},"⚙ Scales"),
-            !props.viewOnly?e('button',{onClick:function(){props.onAdd(props.category);},style:{background:"#fff3",border:"1px solid "+meta.text+"40",borderRadius:6,padding:"4px 10px",color:meta.text,fontSize:12,fontWeight:700,marginRight:8,cursor:"pointer"}},"+ Add"):null,
+            !props.viewOnly?e('button',{onClick:function(){props.onAdd(props.category);},style:{background:"#fff3",border:"1px solid "+meta.text+"40",borderRadius:6,padding:"4px 10px",color:meta.text,fontSize:12,fontWeight:700,marginRight:4,cursor:"pointer"}},"+ Add"):null,
+            isAdmin?e('button',{onClick:function(){setConfirmDel(true);},title:"Delete this section",style:{background:"#0003",border:"1px solid "+meta.text+"40",borderRadius:6,padding:"4px 8px",color:meta.text,fontSize:13,marginRight:4,cursor:"pointer"}},"🗑"):null,
+            confirmDel?e(ConfirmModal,{
+              msg:"Delete \""+displayedCatName+"\"? Sessions are preserved but this section will be hidden from the dashboard.",
+              onConfirm:function(){
+                fetch('/api/categories/'+encodeURIComponent(props.category),{method:'DELETE',headers:{'X-Admin-Pin':props.adminPin||''}})
+                  .then(function(){if(props.onDeleteSection)props.onDeleteSection(props.category);props.onClose();})
+                  .catch(function(){});
+                setConfirmDel(false);
+              },
+              onClose:function(){setConfirmDel(false);}
+            }):null,
             e('button',{onClick:props.onClose,style:{background:"none",border:"none",color:meta.text,fontSize:22,cursor:"pointer",lineHeight:1,padding:"0 4px"}},"✕")
           ),
           e('div',{style:{padding:"8px 16px",borderBottom:"1px solid #1e293b",background:meta.hex+"10",flexShrink:0}},
@@ -1698,7 +1751,14 @@ window.addEventListener('load', function() {
       ]).then(function(res){
         setSessions(res[0]);setScenarios(res[1]);
         if(res[2]&&res[2].length){
+          var hiddenCats=[];
           res[2].forEach(function(c){
+            if(c.hidden){hiddenCats.push(c.name);return;}
+            if(c.displayName){
+              // Store display name override
+              if(!window.CAT_DISPLAY_NAMES)window.CAT_DISPLAY_NAMES={};
+              window.CAT_DISPLAY_NAMES[c.name]=c.displayName;
+            }
             if(c.ivLabels&&c.ivLabels.length){
               if(CATEGORY_META[c.name]){
                 // Override ivLabels for built-in categories too
@@ -1710,8 +1770,10 @@ window.addEventListener('load', function() {
               CATEGORY_META[c.name]={hex:c.hex,text:c.text_color||c.text,icon:c.icon,ivLabels:[],locationHint:"Location",notesHint:"Notes..."};
             }
           });
-          var newNames=res[2].map(function(c){return c.name;}).filter(function(n){return ALL_CATS.indexOf(n)===-1;});
-          setAllCats(ALL_CATS.concat(newNames));
+          var newNames=res[2].filter(function(c){return !c.hidden;}).map(function(c){return c.name;}).filter(function(n){return ALL_CATS.indexOf(n)===-1;});
+          // Filter out hidden categories from ALL_CATS
+          var visibleBuiltins=ALL_CATS.filter(function(n){return hiddenCats.indexOf(n)===-1;});
+          setAllCats(visibleBuiltins.concat(newNames));
         }
         if(res[3]&&res[3].length){
           res[3].forEach(function(t){
@@ -1832,6 +1894,19 @@ window.addEventListener('load', function() {
         .catch(function(){showToast('Q&A save failed',false);});
       setSessions(function(ss){return ss.map(function(s){return s.id===id?Object.assign({},s,{qaThread:qaThread}):s;});});
     }
+    function handleDeleteSection(cat){
+      fetch('/api/categories/'+encodeURIComponent(cat),{method:'DELETE',headers:{'X-Admin-Pin':userPin}})
+        .then(function(r){
+          if(!r.ok){showToast('Delete section failed',false);return;}
+          setAllCats(function(ac){return ac.filter(function(c){return c!==cat;});});
+          showToast('Section "'+getCatDisplayName(cat)+'" hidden',true);
+        })
+        .catch(function(){showToast('Delete section failed',false);});
+    }
+    function handleRenameSection(cat,displayName){
+      window.CAT_DISPLAY_NAMES[cat]=displayName;
+      showToast('Section renamed to "'+displayName+'"',true);
+    }
 
     var filtered=useMemo(function(){return sessions.filter(function(s){
       if(filters.cats.length>0&&filters.cats.indexOf(s.category)<0)return false;
@@ -1906,7 +1981,7 @@ window.addEventListener('load', function() {
               onDrop:unlocked?function(ev){ev.preventDefault();handleCardDrop(cat);setDragOverCat(null);}:null,
               onDragEnd:unlocked?function(){drName.current=null;setDragOverCat(null);}:null,
               style:{borderRadius:18,outline:dragOverCat===cat?"2px dashed #3b82f6":"2px dashed transparent",transition:"outline 0.1s"}},
-              e(CategoryCard,{category:cat,sessions:cs,meta:meta,unlocked:unlocked,newCount:newCount,newQaCount:newQaCount,onClick:unlocked?null:function(){setCatModal(cat);markCategorySeen(cat);}})
+              e(CategoryCard,{category:cat,sessions:cs,meta:meta,unlocked:unlocked,newCount:newCount,newQaCount:newQaCount,role:role,onDelete:handleDeleteSection,onClick:unlocked?null:function(){setCatModal(cat);markCategorySeen(cat);}})
             );
           })
         )
@@ -1918,6 +1993,9 @@ window.addEventListener('load', function() {
         scenario:scenarios[catModal]||"",
         userKey:props.userKey,
         viewOnly:viewOnly,role:role,displayName:displayName,
+        adminPin:userPin,
+        onRename:handleRenameSection,
+        onDeleteSection:function(cat){handleDeleteSection(cat);setCatModal(null);},
         onScenarioChange:function(v){
           fetch('/api/scenarios/'+encodeURIComponent(catModal),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scenario:v})}).catch(function(){});
           setScenarios(function(sc){var o=Object.assign({},sc);o[catModal]=v;return o;});
