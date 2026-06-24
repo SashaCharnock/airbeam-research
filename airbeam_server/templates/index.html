@@ -173,11 +173,12 @@ window.addEventListener('load', function() {
     }
     if (headerIdx === -1) return [];
 
-    // Find the sensor names row — first row where col 5 matches AirBeam3-xxx (dash, not colon)
+    // Find the sensor names row — look for row containing PM2.5 sensor name
     var sensorCols = [];
     for (var i = 0; i < headerIdx; i++) {
       var p = lines[i].split(',');
-      if (p.length > 5 && p[5] && /^AirBeam\d+-/.test(p[5].trim())) {
+      var hasSensor = p.some(function(v){ return /-(PM2\.5|PM1|PM10|RH|[A-Z])$/.test(v.trim()); });
+      if (hasSensor) {
         sensorCols = p.slice(5).map(function(s){ return s.trim(); }).filter(Boolean);
         break;
       }
