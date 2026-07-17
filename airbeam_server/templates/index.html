@@ -1978,7 +1978,7 @@ window.addEventListener('load', function() {
         role==='admin'?e('button',{onClick:function(){setShowUserMgmt(true);},style:{background:"#1e293b",border:"1px solid #334155",borderRadius:8,padding:"7px 10px",color:"#94a3b8",fontSize:12,cursor:"pointer",flexShrink:0}},"👥 Users"):null,
         e('button',{onClick:function(){try{localStorage.removeItem('ab_unlocked');}catch(e){}props.onLogout();},style:{background:"#1e293b",border:"1px solid #334155",borderRadius:8,padding:"7px 10px",color:"#94a3b8",fontSize:12,cursor:"pointer",flexShrink:0}},"⇠ Log out")
       ),
-      activeTab==='analytics'?e(AnalyticsView,{sessions:sessions,allCats:allCats}):null,
+      activeTab==='analytics'?e(AnalyticsView,{sessions:sessions,allCats:allCats,userKey:props.userKey}):null,
       activeTab==='data'?e('div',{style:{padding:"16px 20px",maxWidth:1200,margin:"0 auto"}},
         viewOnly?null:e(UploadZone,{onUpload:handleUpload,loading:loading}),
         e('div',{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginTop:8}},
@@ -2065,12 +2065,80 @@ window.addEventListener('load', function() {
     {key:"humidity",label:"Humidity",unit:"%"}
   ];
 
+  // Derived "how fast did it clear" metrics, computed per-trial from the
+  // full PM2.5 time series rather than read off a flat session field.
+  var DERIVED_METRICS=[
+    {key:"recoveryMin",label:"Recovery Time",unit:"min",derived:true},
+    {key:"decayRate",  label:"Decay Rate",   unit:"µg/m³/min",derived:true}
+  ];
+  var ANALYTICS_METRICS_ALL=ANALYTICS_METRICS.concat(DERIVED_METRICS);
+
+  function timeStrToMinutes(t){
+    var p=(t||"").split(":").map(Number);
+    if(p.length<2||isNaN(p[0])||isNaN(p[1]))return null;
+    return p[0]*60+p[1]+(p[2]||0)/60;
+  }
+
+  // From the PM2.5 peak in a trial's time series, find how long it took
+  // to drop back to (or below) the "Good"/green threshold, and the
+  // average rate of that decline. Returns null if the trial never
+  // exceeded the green threshold, or never recovered within the recording.
+  function computeRecoveryStat(session,greenMax){
+    var ts=session.timeSeries;
+    if(!ts||!ts.length)return null;
+    var peakIdx=-1,peakVal=-Infinity;
+    for(var i=0;i<ts.length;i++){
+      var v=ts[i].pm25;
+      if(v!=null&&!isNaN(v)&&v>peakVal){peakVal=v;peakIdx=i;}
+    }
+    if(peakIdx===-1||peakVal<=greenMax)return null; // never spiked above green
+    for(var j=peakIdx+1;j<ts.length;j++){
+      var vj=ts[j].pm25;
+      if(vj!=null&&!isNaN(vj)&&vj<=greenMax){
+        var m1=timeStrToMinutes(ts[peakIdx].t),m2=timeStrToMinutes(ts[j].t);
+        if(m1==null||m2==null)return null;
+        var mins=m2-m1;
+        if(mins<=0)return null;
+        return{recoveryMin:parseFloat(mins.toFixed(2)),decayRate:parseFloat(((peakVal-greenMax)/mins).toFixed(3))};
+      }
+    }
+    return null; // never returned to green before the recording ended
+  }
+
   function getSessIvValByIdx(sess,idx){
     if(idx<4)return sess["iv"+(idx+1)]||"";
     return ((sess.ivExtra||{}))["iv"+(idx+1)]||"";
   }
 
+  // Resolve a raw IV field value (which may be a quick-tag, several
+  // comma-joined quick-tags, free text, or a tag plus extra free text
+  // like "Middle, 6 feet away") down to a stable grouping key.
+  // Any comma-separated piece that matches one of this field's known
+  // quick-tags is pulled out and used as the group key, so entries that
+  // share a tag but differ in extra description group together. If no
+  // known tag is found in the value, the raw text is used as a fallback
+  // (so plain free-text-only fields still work as before).
+  function groupKeyForIvValue(rawVal,category,label){
+    var raw=(rawVal||"").trim();
+    if(!raw)return "(blank)";
+    var tags=getIvTags(category,label);
+    var tagLookup={};
+    tags.forEach(function(t){tagLookup[t.toLowerCase()]=t;});
+    var parts=raw.split(',').map(function(p){return p.trim();}).filter(Boolean);
+    var matched=[];
+    parts.forEach(function(p){
+      var canon=tagLookup[p.toLowerCase()];
+      if(canon&&matched.indexOf(canon)===-1)matched.push(canon);
+    });
+    if(matched.length)return matched.sort().join(', ');
+    return raw;
+  }
+
   // Pure SVG bar chart — no external deps
+  function hasBands(metric){
+    return !!PM_BANDS[metric==="humidity"?"rh":metric==="temp"?"temp":metric];
+  }
+
   function BarChart(props){
     var groups=props.groups,metric=props.metric,color=props.color,unit=props.unit;
     if(!groups||!groups.length)return e('div',{style:{color:"#475569",fontFamily:"monospace",fontSize:12,padding:16}},"No data");
@@ -2095,7 +2163,7 @@ window.addEventListener('load', function() {
         var x=PL+gap+(bW+gap)*i;
         var bH=g.avg!=null?Math.max(2,cH*(g.avg/maxV)):0;
         var y=PT+cH-bH;
-        var bc=getBandColor(g.avg,metric==="humidity"?"rh":metric==="temp"?"temp":metric)||color;
+        var bc=hasBands(metric)?(getBandColor(g.avg,metric==="humidity"?"rh":metric==="temp"?"temp":metric)||color):color;
         var label=g.label||"—";
         var labelLines=[];
         // wrap label at ~12 chars
@@ -2148,7 +2216,7 @@ window.addEventListener('load', function() {
         var cx=x+bW/2;
         var q=quartiles(g.vals||[]);
         if(!q)return null;
-        var bc=getBandColor(q.med,metric==="humidity"?"rh":metric==="temp"?"temp":metric)||color;
+        var bc=hasBands(metric)?(getBandColor(q.med,metric==="humidity"?"rh":metric==="temp"?"temp":metric)||color):color;
         var label=g.label||"—";
         var labelLines=[];
         var words=label.split(/[\s\/,]+/),line="";
@@ -2198,7 +2266,7 @@ window.addEventListener('load', function() {
       }),
       groups.map(function(g,i){
         var cx=PL+colW*i+colW/2;
-        var bc=getBandColor(g.avg,metric==="humidity"?"rh":metric==="temp"?"temp":metric)||color;
+        var bc=hasBands(metric)?(getBandColor(g.avg,metric==="humidity"?"rh":metric==="temp"?"temp":metric)||color):color;
         var label=g.label||"—";
         var labelLines=[];
         var words=label.split(/[\s\/,]+/),line="";
@@ -2246,23 +2314,49 @@ window.addEventListener('load', function() {
     var chv=useState({bar:true,box:true,scatter:true}),charts=chv[0],setCharts=chv[1];
     function dismissChart(k){setCharts(function(c){var n=Object.assign({},c);n[k]=false;return n;});}
     function restoreAll(){setCharts({bar:true,box:true,scatter:true});}
-    var metricInfo=ANALYTICS_METRICS.find(function(m){return m.key===activeMetric;})||ANALYTICS_METRICS[0];
+    var metricInfo=ANALYTICS_METRICS_ALL.find(function(m){return m.key===activeMetric;})||ANALYTICS_METRICS_ALL[0];
+    var isDerived=!!metricInfo.derived;
+
+    // The "Good"/green PM2.5 ceiling for this category — respects a
+    // custom threshold set in the section's scale settings, falling
+    // back to the app-wide default otherwise.
+    var scKey='ab_scales_'+(props.userKey||'guest')+'_'+cat;
+    var greenMax=useMemo(function(){
+      try{
+        var r=localStorage.getItem(scKey);
+        if(r){var parsed=JSON.parse(r);if(parsed&&parsed.pm25&&parsed.pm25.thresholds)return parsed.pm25.thresholds[0];}
+      }catch(err){}
+      return PM_BANDS.pm25.thresholds[0];
+    },[scKey]);
 
     var groups=useMemo(function(){
+      var activeLabel=ivLabels[activeIV];
       var grouped={};
+      var skippedNoRecovery=0;
       sessions.forEach(function(s){
-        var val=getSessIvValByIdx(s,activeIV)||"(blank)";
-        var v=s[activeMetric];
+        var raw=getSessIvValByIdx(s,activeIV);
+        if(!(raw||"").trim())return; // no IV value entered — leave it out of the chart entirely
+        var val=groupKeyForIvValue(raw,cat,activeLabel);
+        var v;
+        if(isDerived){
+          var stat=computeRecoveryStat(s,greenMax);
+          if(!stat){skippedNoRecovery++;return;}
+          v=activeMetric==="recoveryMin"?stat.recoveryMin:stat.decayRate;
+        }else{
+          v=s[activeMetric];
+        }
         if(v==null)return;
         if(!grouped[val])grouped[val]={vals:[]};
         grouped[val].vals.push(v);
       });
-      return Object.keys(grouped).sort().map(function(lbl){
+      var result=Object.keys(grouped).sort().map(function(lbl){
         var vals=grouped[lbl].vals;
         var avg=vals.length?(vals.reduce(function(a,b){return a+b;},0)/vals.length):null;
         return{label:lbl,vals:vals,avg:avg!=null?parseFloat(avg.toFixed(2)):null,n:vals.length};
       });
-    },[sessions,activeIV,activeMetric]);
+      result.skippedNoRecovery=skippedNoRecovery;
+      return result;
+    },[sessions,activeIV,activeMetric,cat,ivLabels,isDerived,greenMax]);
 
     var hasData=groups.some(function(g){return g.n>0;});
     var allDismissed=!charts.bar&&!charts.box&&!charts.scatter;
@@ -2283,13 +2377,17 @@ window.addEventListener('load', function() {
         ):e('span',{style:{fontSize:11,color:"#475569",fontFamily:"monospace"}},"No IV labels set — add them in the section settings"),
         e('div',{style:{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}},
           e('span',{style:{fontSize:10,color:"#475569",fontFamily:"monospace",marginRight:2}},"METRIC:"),
-          ANALYTICS_METRICS.map(function(m){
+          ANALYTICS_METRICS_ALL.map(function(m){
             return e('button',{key:m.key,onClick:function(){setActiveMetric(m.key);},
               style:Object.assign({},btnBase,{background:activeMetric===m.key?"#3b82f620":"#1e293b",color:activeMetric===m.key?"#60a5fa":"#64748b",borderColor:activeMetric===m.key?"#3b82f660":"#334155"})},m.label);
           })
         ),
         allDismissed?e('button',{onClick:restoreAll,style:Object.assign({},btnBase,{background:"#1e293b",color:"#94a3b8"})},"↺ Restore charts"):null
       ),
+      isDerived?e('div',{style:{fontSize:10,color:"#475569",fontFamily:"monospace",marginBottom:10}},
+        "Time (and rate) from each trial's PM2.5 peak back down to the \"Good\" threshold ("+greenMax+" µg/m³ for this section). Trials that never exceeded "+greenMax+" µg/m³, or never dropped back below it, are left out."+
+        (groups.skippedNoRecovery?" "+groups.skippedNoRecovery+" trial(s) never recovered within the recording and were excluded.":"")
+      ):null,
       !hasData?e('div',{style:{color:"#475569",fontFamily:"monospace",fontSize:12,padding:"16px 0"}},"No data with this IV filled in yet."):
       e('div',{style:{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(320px,1fr))",gap:12}},
         charts.bar?e(ChartCard,{title:"▬ Bar — Average "+metricInfo.label+" per Group",onDismiss:function(){dismissChart('bar');},
@@ -2359,7 +2457,7 @@ window.addEventListener('load', function() {
   }
 
   function AnalyticsView(props){
-    var sessions=props.sessions,allCats=props.allCats;
+    var sessions=props.sessions,allCats=props.allCats,userKey=props.userKey;
     var opv=useState(null),openCat=opv[0],setOpenCat=opv[1];
     var catsWithData=allCats.filter(function(cat){
       return sessions.some(function(s){return s.category===cat;});
@@ -2388,7 +2486,8 @@ window.addEventListener('load', function() {
         key:openCat,
         category:openCat,
         meta:CATEGORY_META[openCat],
-        sessions:sessions.filter(function(s){return s.category===openCat;})
+        sessions:sessions.filter(function(s){return s.category===openCat;}),
+        userKey:userKey
       }):null,
       // cross-section panel always shown
       e(CrossSectionPanel,{sessions:sessions,allCats:catsWithData})
