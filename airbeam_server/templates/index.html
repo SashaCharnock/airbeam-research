@@ -2111,24 +2111,35 @@ window.addEventListener('load', function() {
   }
 
   // Resolve a raw IV field value (which may be a quick-tag, several
-  // comma-joined quick-tags, free text, or a tag plus extra free text
-  // like "Middle, 6 feet away") down to a stable grouping key.
-  // Any comma-separated piece that matches one of this field's known
-  // quick-tags is pulled out and used as the group key, so entries that
-  // share a tag but differ in extra description group together. If no
-  // known tag is found in the value, the raw text is used as a fallback
-  // (so plain free-text-only fields still work as before).
+  // comma-joined quick-tags, free text, a tag plus extra free text like
+  // "Middle, 6 feet away", or a tag with extra words folded right into
+  // the same phrase like "2 Windows Open at front Beside me&k") down to
+  // a stable grouping key.
+  // Any known quick-tag found ANYWHERE in the raw text (not just as its
+  // own comma-separated piece) is pulled out and used as the group key,
+  // so entries that share a tag but differ in extra location/description
+  // text still group together. When one matched tag is itself contained
+  // inside another matched tag (e.g. "1 Window" inside "1 Window Open"),
+  // only the more specific (longer) tag is kept. If no known tag is
+  // found in the value, the raw text is used as a fallback (so plain
+  // free-text-only fields still work as before).
   function groupKeyForIvValue(rawVal,category,label){
     var raw=(rawVal||"").trim();
     if(!raw)return "(blank)";
     var tags=getIvTags(category,label);
-    var tagLookup={};
-    tags.forEach(function(t){tagLookup[t.toLowerCase()]=t;});
-    var parts=raw.split(',').map(function(p){return p.trim();}).filter(Boolean);
+    var lowerRaw=raw.toLowerCase();
     var matched=[];
-    parts.forEach(function(p){
-      var canon=tagLookup[p.toLowerCase()];
-      if(canon&&matched.indexOf(canon)===-1)matched.push(canon);
+    tags.forEach(function(t){
+      if(!t)return;
+      if(lowerRaw.indexOf(t.toLowerCase())!==-1&&matched.indexOf(t)===-1)matched.push(t);
+    });
+    // Drop any matched tag that is itself a substring of another matched
+    // tag, so "1 Window" doesn't create a separate bucket from the more
+    // specific "1 Window Open" when both happen to match.
+    matched=matched.filter(function(t){
+      return !matched.some(function(other){
+        return other!==t&&other.length>t.length&&other.toLowerCase().indexOf(t.toLowerCase())!==-1;
+      });
     });
     if(matched.length)return matched.sort().join(', ');
     return raw;
