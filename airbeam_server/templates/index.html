@@ -2647,7 +2647,8 @@ window.addEventListener('load', function() {
       fetch('/api/categories/'+encodeURIComponent(category)+'/tags/'+encodeURIComponent(label),{
         method:'PUT',
         headers:{'Content-Type':'application/json','X-User-Pin':props.pin||''},
-        body:JSON.stringify({tags:updated})
+        body:JSON.stringify({tags:updated}),
+        keepalive:true
       }).catch(function(){});
     }
     function insertTag(tag){
