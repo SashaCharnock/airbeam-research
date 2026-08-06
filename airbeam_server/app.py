@@ -341,10 +341,21 @@ def get_iv_tags():
         result.append(d)
     return jsonify(result)
 
-@app.route("/api/categories/<category>/tags/<label>", methods=["PUT"])
-def update_iv_tags(category, label):
+@app.route("/api/iv-tags", methods=["PUT"])
+def update_iv_tags():
+    # category/label are passed in the body (not the URL path) so that
+    # labels containing special characters like "/" or "#" -- e.g.
+    # "Type / # of Pets" -- can't ever break Flask's route matching.
+    # (A "/api/categories/<category>/tags/<label>" path previously used
+    # here would silently 404 on any label containing a slash, even when
+    # correctly percent-encoded by the browser, because Flask/Werkzeug's
+    # default routing treats a decoded "/" as a path separator.)
     data = request.get_json()
+    category = data.get("category", "")
+    label = data.get("label", "")
     tags = data.get("tags", [])
+    if not category or not label:
+        return jsonify({"ok": False, "error": "category and label are required"}), 400
     with get_db() as con:
         con.execute("""
             INSERT INTO custom_iv_tags (category, label, tags)

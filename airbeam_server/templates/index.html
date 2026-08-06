@@ -2644,10 +2644,10 @@ window.addEventListener('load', function() {
     function persist(updated){
       IV_TAGS_STORE[k]=updated;
       setTags(updated);
-      fetch('/api/categories/'+encodeURIComponent(category)+'/tags/'+encodeURIComponent(label),{
+      fetch('/api/iv-tags',{
         method:'PUT',
         headers:{'Content-Type':'application/json','X-User-Pin':props.pin||''},
-        body:JSON.stringify({tags:updated}),
+        body:JSON.stringify({category:category,label:label,tags:updated}),
         keepalive:true
       }).catch(function(){});
     }
